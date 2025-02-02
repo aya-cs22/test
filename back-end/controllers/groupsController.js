@@ -110,7 +110,7 @@ exports.getGroupsById = async (req, res) => {
 exports.updateGroupsById = async (req, res) => {
     try {
         const { groupId } = req.params;
-        const { title, type_course, location, start_date, end_date } = req.body;
+        const { title, type_course, location, start_date, end_date, price, course_details, about_course } = req.body;
 
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Access denied' });
@@ -121,7 +121,10 @@ exports.updateGroupsById = async (req, res) => {
             type_course: type_course,
             location: location || "",
             start_date: start_date,
-            end_date: end_date
+            end_date: end_date,
+            price: price,
+            course_details: course_details,
+            about_course :about_course
         };
 
         const updatedGroup = await Groups.findByIdAndUpdate(groupId, updateGroupsData, { new: true, runValidators: true });
