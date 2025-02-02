@@ -776,7 +776,11 @@ exports.deleteLecturesById = async (req, res) => {
 
 
 
-// create task by admin
+
+
+
+
+
 exports.createTaskInLecture = async (req, res) => {
   try {
     const { lectureId } = req.params;
@@ -795,11 +799,13 @@ exports.createTaskInLecture = async (req, res) => {
       description_task,
       end_date,
     };
-    // const updatedLecture = await Lectures.findById(lectureId).populate('tasks');
 
     lecture.tasks.push(newTask);
     lecture.updated_at = Date.now();
     await lecture.save();
+
+    const createdTask = lecture.tasks[lecture.tasks.length - 1];
+    const taskId = createdTask._id;
 
     const group = await Groups.findById(lecture.group_id);
     if (!group) {
@@ -807,15 +813,27 @@ exports.createTaskInLecture = async (req, res) => {
     }
 
     const users = await User.find({ 'groups.groupId': lecture.group_id });
-    console.log('Users in group:', users);
     const approvedUsers = users.filter(user => {
       return user.groups.some(group =>
         group.groupId.toString() === lecture.group_id.toString() && group.status === 'approved'
       );
     });
 
-
-    console.log('Approved users:', approvedUsers);
+    for (const user of approvedUsers) {
+      const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
+      if (userGroup) {
+        userGroup.tasks.push({
+          taskId: taskId, 
+          taskName: description_task, 
+          submissionLink: null, 
+          submittedOnTime: null,
+          submittedAt: null, 
+          score: null,
+          feedback: null, 
+        });
+        await user.save();
+      }
+    }
 
     const emailAddresses = approvedUsers.map(user => user.email);
 
@@ -842,14 +860,12 @@ exports.createTaskInLecture = async (req, res) => {
               </main>
               <footer style="background-color: #f9f9f9; text-align: center; padding: 10px; font-size: 0.9em; color: #666;">
                 <p>Thank you for being part of Code Eagles. 🦅</p>
-                <p>If you have any questions, feel free to contact us at <a href="mailto:codeeagles653@gmail.com
-" style="color: #4CAF50;">codeeagles653@gmail.com</a>.</p>
+                <p>If you have any questions, feel free to contact us at <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">codeeagles653@gmail.com</a>.</p>
               </footer>
             </div>
           `,
           text: `Dear User,\n\nA new task titled "${description_task}" has been created in your lecture. You can now access the task and submit your work before the due date: ${end_date}.\n\nBest regards,\nCode Eagles`,
         };
-
 
         try {
           await transporter.sendMail(mailOptions);
@@ -912,7 +928,7 @@ exports.updateTaskInLecture = async (req, res) => {
 
     console.log('Approved users:', approvedUsers);
 
-    const emailAddresses = approvedUsers.map(user => user.email);
+  /*  const emailAddresses = approvedUsers.map(user => user.email);
 
     if (emailAddresses.length === 0) {
       console.log('No approved users to notify');
@@ -952,7 +968,7 @@ exports.updateTaskInLecture = async (req, res) => {
         }
       });
     }
-
+*/
     return res.status(200).json({ message: 'Task updated successfully', task });
   } catch (error) {
     console.error(error);
@@ -1041,8 +1057,6 @@ exports.getAllTasksByLectureId = async (req, res) => {
 
 
 
-
-
 exports.submitTask = async (req, res) => {
   try {
     const { lectureId, taskId } = req.params;
@@ -1050,7 +1064,6 @@ exports.submitTask = async (req, res) => {
     const currentDate = Date.now();
 
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return res.status(403).json({ message: 'User not authenticated' });
     }
@@ -1065,6 +1078,11 @@ exports.submitTask = async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
+    const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
+    if (!userGroup || userGroup.status !== 'approved') {
+      return res.status(403).json({ message: 'User is not approved in this group' });
+    }
+
     if (currentDate > new Date(task.end_date)) {
       return res.status(403).json({ message: 'Task submission is no longer allowed as the deadline has passed' });
     }
@@ -1073,21 +1091,18 @@ exports.submitTask = async (req, res) => {
       return res.status(400).json({ message: 'Invalid URL format' });
     }
     submissionLink = xss(submissionLink);
-    const allowedDomain = 'drive.google.com';
-    const url = new URL(submissionLink);
 
-    if (url.hostname !== allowedDomain) {
-      return res.status(400).json({ message: 'Only Google Drive links are allowed' });
+    const allowedDomains = ['drive.google.com', 'github.com'];
+    const url = new URL(submissionLink);
+    if (!allowedDomains.includes(url.hostname)) {
+      return res.status(400).json({ message: 'Only Google Drive or GitHub links are allowed' });
     }
 
     if (!submissionLink.startsWith('https://')) {
       return res.status(400).json({ message: 'Only HTTPS links are allowed' });
     }
 
-
-
     const existingSubmission = task.submissions.find(submission => submission.userId.toString() === user.id);
-
     if (existingSubmission) {
       existingSubmission.submissionLink = submissionLink;
       existingSubmission.submittedAt = currentDate;
@@ -1103,15 +1118,13 @@ exports.submitTask = async (req, res) => {
       });
     }
 
-    // Update or add task in user's record
-    const userTask = user.tasks.find(t => t.lectureId.toString() === lectureId && t.taskId.toString() === taskId);
+    const userTask = userGroup.tasks.find(t => t.taskId.toString() === taskId);
     if (userTask) {
       userTask.submissionLink = submissionLink;
       userTask.submittedAt = currentDate;
       userTask.submittedOnTime = currentDate <= new Date(task.end_date);
     } else {
-      user.tasks.push({
-        lectureId: lectureId,
+      userGroup.tasks.push({
         taskId: taskId,
         submissionLink: submissionLink,
         submittedAt: currentDate,
@@ -1122,7 +1135,6 @@ exports.submitTask = async (req, res) => {
     }
 
     await user.save();
-
     lecture.updated_at = Date.now();
     await lecture.save();
 
@@ -1135,75 +1147,123 @@ exports.submitTask = async (req, res) => {
 
 
 
-
-
-exports.evaluateTask = async (req, res) => {
+exports.getUserTasksInGroup = async (req, res) => {
   try {
-    const { lectureId, taskId, submissionId } = req.params;
+    const { groupId, userId } = req.params;
+
+    const group = await Groups.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ message: 'Group not found' });
+    }
+
+    const currentUser = await User.findById(req.user.id);
+    const isAdmin = currentUser.role === 'admin' || group.admin.toString() === req.user.id;
+
+    if (!isAdmin) {
+      return res.status(403).json({ message: 'Access denied: You are not an admin of this group' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const userGroup = user.groups.find(g => g.groupId.toString() === groupId);
+    if (!userGroup) {
+      return res.status(404).json({ message: 'User is not a member of this group' });
+    }
+
+    const tasks = userGroup.tasks;
+
+    return res.status(200).json({ tasks });
+  } catch (error) {
+    console.error('Error fetching user tasks:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+
+const updateTotalScore = async (userId, groupId) => {
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const userGroup = user.groups.find(group => group.groupId.toString() === groupId.toString());
+    if (!userGroup) {
+      throw new Error('User group not found');
+    }
+
+    const totalScore = userGroup.tasks.reduce((sum, task) => {
+      return sum + (task.score || 0);
+    }, 0);
+
+    userGroup.totalScore = totalScore;
+    await user.save();
+
+    console.log(`Total score updated for user ${userId} in group ${groupId}: ${totalScore}`);
+  } catch (error) {
+    console.error('Error updating total score:', error);
+  }
+};
+
+
+
+
+exports.addScoreAndFeedback = async (req, res) => {
+  try {
+    const { lectureId, taskId, userId } = req.params;
     const { score, feedback } = req.body;
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Only admins can add scores and feedback.' });
+    }
+
     const lecture = await Lectures.findById(lectureId);
     if (!lecture) {
       return res.status(404).json({ message: 'Lecture not found' });
     }
+
     const task = lecture.tasks.id(taskId);
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    const submission = task.submissions.id(submissionId);
+    const submission = task.submissions.find(sub => sub.userId.toString() === userId);
     if (!submission) {
-      return res.status(404).json({ message: 'Submission not found' });
+      return res.status(404).json({ message: 'User submission not found' });
     }
 
     submission.score = score;
     submission.feedback = feedback;
-
+    lecture.updated_at = Date.now();
     await lecture.save();
 
-    const user = await User.findById(submission.userId);
-    if (user) {
-      const userTask = user.tasks.find(t => t.lectureId.toString() === lectureId && t.taskId.toString() === taskId);
-      if (userTask) {
-        userTask.score = score;
-        userTask.feedback = feedback;
-        await user.save();
-      }
-
-      const mailOptions = {
-        from: process.env.ADMIN_EMAIL,
-        to: user.email,
-        subject: '📊 Task Evaluation Results',
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <header style="background-color: #4CAF50; color: white; text-align: center; padding: 20px;">
-              <h1 style="margin: 0;">Code Eagles 🦅</h1>
-              <p style="font-size: 1.2em;">Your Task Evaluation Results</p>
-            </header>
-            <main style="padding: 20px;">
-              <h2 style="color: #4CAF50;">📊 Task Evaluation Completed!</h2>
-              <p>Dear ${user.name},</p>
-              <p>We have evaluated your task, and here are your results:</p>
-              <p><strong>Score:</strong> ${score}</p>
-              <p><strong>Feedback:</strong></p>
-              <p style="font-style: italic; color: #555;">"${feedback}"</p>
-              <p>Keep up the great work and continue improving! 💪</p>
-            </main>
-            <footer style="background-color: #f9f9f9; text-align: center; padding: 10px; font-size: 0.9em; color: #666;">
-              <p>Thank you for being part of Code Eagles! 🦅</p>
-              <p>If you have any questions or need further assistance, feel free to contact us at <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">codeeagles653@gmail.com</a>.</p>
-            </footer>
-          </div>
-        `,
-        text: `Dear ${user.name},\n\nYour task has been evaluated.\nScore: ${score}\nFeedback: ${feedback}\n\nBest regards,\nCode Eagles`,
-      };
-
-
-      await transporter.sendMail(mailOptions);
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    return res.status(200).json({ message: 'Task evaluated and email sent successfully', score, feedback });
+    const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
+    if (!userGroup || userGroup.status !== 'approved') {
+      return res.status(403).json({ message: 'User is not approved in this group' });
+    }
+
+    const userTask = userGroup.tasks.find(t => t.taskId.toString() === taskId);
+    if (!userTask) {
+      return res.status(404).json({ message: 'User task not found' });
+    }
+
+    userTask.score = score;
+    userTask.feedback = feedback;
+    await user.save();
+
+    await updateTotalScore(userId, lecture.group_id);
+
+    return res.status(200).json({ message: 'Score and feedback added successfully', submission });
   } catch (error) {
-    console.error('Error evaluating task:', error);
+    console.error('Error adding score and feedback:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1212,70 +1272,94 @@ exports.evaluateTask = async (req, res) => {
 
 
 
-exports.getAllUserSubmissionsForTask = async (req, res) => {
+exports.getUserTasksByGroupId = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const userGroup = user.groups.find(group => group.groupId.toString() === groupId);
+    if (!userGroup) {
+      return res.status(404).json({ message: 'User is not part of this group' });
+    }
+
+    const lectures = await Lectures.find({ group_id: groupId });
+    if (!lectures || lectures.length === 0) {
+      return res.status(404).json({ message: 'No lectures found for this group' });
+    }
+
+    const userTasks = [];
+
+    lectures.forEach(lecture => {
+      lecture.tasks.forEach(task => {
+        if (!task || !task._id) {
+          console.error('Task or task._id is undefined:', task);
+          return; 
+        }
+
+        const userSubmissionInLecture = task.submissions.find(sub => sub.userId.toString() === userId);
+
+        const userTaskInUserSchema = userGroup.tasks.find(t => {
+          if (!t || !t.taskId) {
+            console.error('Task or taskId is undefined:', t);
+            return false; 
+          }
+          return t.taskId.toString() === task._id.toString();
+        });
+        const submission = userSubmissionInLecture || userTaskInUserSchema;
+
+        userTasks.push({
+          lectureId: lecture._id,
+          lectureTitle: lecture.title,
+          taskId: task._id,
+          taskDescription: task.description_task,
+          endDate: task.end_date,
+          submission: submission
+            ? {
+                submissionLink: submission.submissionLink,
+                submittedAt: submission.submittedAt,
+                submittedOnTime: submission.submittedOnTime,
+                score: submission.score,
+                feedback: submission.feedback,
+              }
+            : null,
+          score: submission ? submission.score : null, 
+          feedback: submission ? submission.feedback : null,
+        });
+      });
+    });
+
+    return res.status(200).json({ tasks: userTasks });
+  } catch (error) {
+    console.error('Error fetching user tasks:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+exports.getTaskSubmissions = async (req, res) => {
   try {
     const { lectureId, taskId } = req.params;
 
     if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied' });
+      return res.status(403).json({ message: 'Access denied. Only admins can access this endpoint.' });
     }
 
     const lecture = await Lectures.findById(lectureId);
     if (!lecture) {
       return res.status(404).json({ message: 'Lecture not found' });
-    }
-
-    const task = lecture.tasks.find(task => task._id.toString() === taskId);
-    if (!task) {
-      return res.status(404).json({ message: 'Task not found' });
-    }
-
-    const taskSubmissions = await Promise.all(
-      task.submissions.map(async (submission) => {
-        const user = await User.findById(submission.userId);
-        return {
-          submissionId: submission._id,
-          userId: submission.userId,
-          email: user.email,
-          userName: user.name,
-          submissionLink: submission.submissionLink,
-          submittedAt: submission.submittedAt,
-          submittedOnTime: submission.submittedOnTime,
-          score: submission.score,
-          feedback: submission.feedback,
-        };
-      })
-    );
-    return res.status(200).json({
-      taskId: task._id,
-      taskTitle: task.description_task,
-      submissions: taskSubmissions,
-    });
-  } catch (error) {
-    console.error('Error fetching submissions for task:', error);
-    return res.status(500).json({ message: 'Server error' });
-  }
-};
-
-
-
-
-exports.getUsersNotSubmittedTask = async (req, res) => {
-  try {
-    const { lectureId, taskId } = req.params;
-
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    const lecture = await Lectures.findById(lectureId).populate('group_id');
-    if (!lecture) {
-      return res.status(404).json({ message: 'Lecture not found' });
-    }
-
-    const group = lecture.group_id;
-    if (!group || !group.members || group.members.length === 0) {
-      return res.status(404).json({ message: 'No members found in this group' });
     }
 
     const task = lecture.tasks.find(t => t._id.toString() === taskId);
@@ -1283,118 +1367,57 @@ exports.getUsersNotSubmittedTask = async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    const users = await User.find({
-      '_id': { $in: group.members.map(member => member.user_id) }
-    });
-
-    const usersNotSubmitted = [];
-
-    for (let user of users) {
-      const taskSubmission = task.submissions.find(submission => submission.userId.toString() === user._id.toString());
-
-      if (!taskSubmission) {
-        usersNotSubmitted.push(user);
-      }
+    const group = await Groups.findById(lecture.group_id);
+    if (!group) {
+      return res.status(404).json({ message: 'Group not found' });
     }
 
-    return res.status(200).json(usersNotSubmitted);
-  } catch (error) {
-    console.error('Error fetching users who did not submit task:', error);
-    return res.status(500).json({ message: 'Server error' });
-  }
-};
-
-
-
-
-exports.getUserSubmissionsForGroup = async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const userId = req.user.id;
-    if (!mongoose.Types.ObjectId.isValid(groupId)) {
-      return res.status(400).json({ message: 'Invalid groupId' });
-    }
-
-    const groupObjectId = new mongoose.Types.ObjectId(groupId);
-
-    const lectures = await Lectures.find({ group_id: groupObjectId });
-    if (!lectures || lectures.length === 0) {
-      return res.status(404).json({ message: 'No lectures found for this group' });
-    }
-
-    const userTasks = lectures.flatMap(lecture => {
-      const tasksWithSubmissions = lecture.tasks.filter(task =>
-        task.submissions.some(submission => submission.userId.toString() === userId)
+    const users = await User.find({ 'groups.groupId': lecture.group_id });
+    const approvedUsers = users.filter(user => {
+      return user.groups.some(group =>
+        group.groupId.toString() === lecture.group_id.toString() && group.status === 'approved'
       );
-
-      if (tasksWithSubmissions.length > 0) {
-        return tasksWithSubmissions.map(task => ({
-          lectureTitle: lecture.title,
-          taskDescription: task.description_task,
-          endDate: task.end_date,
-          submission: task.submissions.find(submission => submission.userId.toString() === userId)
-        }));
-      }
-
-      return [];
     });
 
-    if (userTasks.length === 0) {
-      return res.status(404).json({ message: 'No submissions found for this user in this group' });
-    }
+    const submittedUsers = [];
+    const notSubmittedUsers = [];
 
-    return res.status(200).json({ tasks: userTasks });
+    approvedUsers.forEach(user => {
+      const submission = task.submissions.find(sub => sub.userId.toString() === user._id.toString());
+
+      if (submission) {
+        submittedUsers.push({
+          userId: user._id,
+          name: user.name,
+          email: user.email,
+          submission: {
+            submissionLink: submission.submissionLink,
+            submittedAt: submission.submittedAt,
+            submittedOnTime: submission.submittedOnTime,
+            score: submission.score,
+            feedback: submission.feedback,
+          },
+        });
+      } else {
+        notSubmittedUsers.push({
+          userId: user._id,
+          name: user.name,
+          email: user.email,
+        });
+      }
+    });
+
+    return res.status(200).json({
+      submittedUsers,
+      notSubmittedUsers,
+    });
   } catch (error) {
-    console.error('Error fetching user submissions for group:', error);
+    console.error('Error fetching task submissions:', error);
     return res.status(500).json({ message: 'Server error' });
   }
 };
 
 
-
-
-exports.getUserUnsubmittedTasksForGroup = async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const userId = req.user.id;
-
-    if (!mongoose.Types.ObjectId.isValid(groupId)) {
-      return res.status(400).json({ message: 'Invalid groupId' });
-    }
-
-    const groupObjectId = new mongoose.Types.ObjectId(groupId);
-
-    const lectures = await Lectures.find({ group_id: groupObjectId });
-    if (!lectures || lectures.length === 0) {
-      return res.status(404).json({ message: 'No lectures found for this group' });
-    }
-
-    const unsubmittedTasks = lectures.flatMap(lecture => {
-      const tasksWithoutSubmissions = lecture.tasks.filter(task =>
-        !task.submissions.some(submission => submission.userId.toString() === userId)
-      );
-
-      if (tasksWithoutSubmissions.length > 0) {
-        return tasksWithoutSubmissions.map(task => ({
-          lectureTitle: lecture.title,
-          taskDescription: task.description_task,
-          endDate: task.end_date,
-        }));
-      }
-
-      return [];
-    });
-
-    if (unsubmittedTasks.length === 0) {
-      return res.status(404).json({ message: 'All tasks have been submitted by this user for this group' });
-    }
-
-    return res.status(200).json({ tasks: unsubmittedTasks });
-  } catch (error) {
-    console.error('Error fetching user unsubmitted tasks for group:', error);
-    return res.status(500).json({ message: 'Server error' });
-  }
-};
 
 
 exports.deleteTask = async (req, res) => {
@@ -1408,15 +1431,18 @@ exports.deleteTask = async (req, res) => {
     }
 
     session.startTransaction();
+
     const lecture = await Lectures.findById(lectureId).session(session);
     if (!lecture) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'Lecture not found' });
     }
 
     const taskIndex = lecture.tasks.findIndex(task => task._id.toString() === taskId);
     if (taskIndex === -1) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'Task not found in this lecture' });
     }
 
@@ -1426,10 +1452,15 @@ exports.deleteTask = async (req, res) => {
     lecture.tasks.splice(taskIndex, 1);
     await lecture.save({ session });
 
+    const groupId = lecture.group_id;
+
     await User.updateMany(
-      { _id: { $in: submissionUserIds } },
-      { $pull: { tasks: { taskId: taskId } } },
-      { session }
+      { 'groups.groupId': groupId }, 
+      { $pull: { 'groups.$[group].tasks': { taskId: new mongoose.Types.ObjectId(taskId) } } },
+      {
+        session,
+        arrayFilters: [{ 'group.groupId': groupId }],
+      }
     );
 
     await session.commitTransaction();
@@ -1445,3 +1476,5 @@ exports.deleteTask = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+

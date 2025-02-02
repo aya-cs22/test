@@ -17,9 +17,13 @@ const nodemailer = require('nodemailer');
 // creat group by admin
 exports.creatGroups = async (req, res) => {
     try {
-        const { title, type_course, location, start_date, end_date } = req.body;
+        const { title, type_course, location, start_date, end_date , price, course_details, about_course } = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Acess denied' });
+        }
+
+        if (typeof price !== 'number' || price < 0) {
+            return res.status(400).json({ message: 'Invalid price value' });
         }
         const groups = new Groups({
 
@@ -27,7 +31,10 @@ exports.creatGroups = async (req, res) => {
             type_course, location,
             location,
             start_date,
-            end_date
+            end_date,
+            price ,
+            course_details: course_details || [],
+            about_course: about_course || []
         });
         await groups.save();
         res.status(201).json(groups);

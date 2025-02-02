@@ -13,8 +13,8 @@ const taskSchema = new mongoose.Schema({
       submissionLink: {
         type: String,
         required: true,
-        minlength: [30, 'Google Drive link must be at least 30 characters long'], 
-        maxlength: [150, 'Google Drive link cannot be longer than 150 characters'],
+        // minlength: [30, 'Google Drive or GitHub  link must be at least 30 characters long'], 
+        // maxlength: [150, 'Google Drive or GitHub  link cannot be longer than 150 characters'],
       },
       submittedAt: {
         type: Date,

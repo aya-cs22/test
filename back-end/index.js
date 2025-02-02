@@ -6,7 +6,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const xss = require('xss');
 dotenv.config({ path: 'config.env' });
-const dbConnection = require('./config/db.js');
+const { dbConnection } = require('./config/db');
 const userController = require('./controllers/userController.js');
 const cron = require('node-cron');
 const Groups = require('./models/groups.js');
@@ -40,11 +40,13 @@ const userRoutes = require('./routes/userRoutes.js');
 const groupsRoutes = require('./routes/groupsRoutes.js');
 const lectureRoutes = require('./routes/lectureRoutes.js');
 const contactusRoutes = require('./routes/ContactMessageRoutes.js');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/lectures', lectureRoutes);
 app.use('/api/contact', contactusRoutes);
+app.use('/api/payment', paymentRoutes);
 
 redisClient.on('connect', () => {
     console.log('Connected to Redis');

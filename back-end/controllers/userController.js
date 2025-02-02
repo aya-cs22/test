@@ -36,7 +36,7 @@ const escapeHtml = (str) => {
             '>': '&gt;',
             '"': '&quot;',
             "'": '&#039;',
-            '/': '&#x2F;',
+            // '/': '&#x2F;',
         };
         return map[match];
     });
@@ -550,9 +550,9 @@ exports.login = async (req, res) => {
         }
         
 
-        if (user.role !== 'admin' && user.fingerprint !== fingerprint) {
-            return res.status(400).json({ message: 'Fingerprint mismatch. Login denied.' });
-        }
+        //if (user.role !== 'admin' && user.fingerprint !== fingerprint) {
+     //     return res.status(400).json({ message: 'Fingerprint mismatch. Login denied.' });
+     //   }
 
         const token = jwt.sign(
             { id: user._id, role: user.role },
@@ -621,8 +621,8 @@ exports.addUser = async (req, res) => {
                         groupId: groupId,
                         status: 'approved',
                         attendancePercentage: 0,
-                        totalAttendance: 0, 
-                        totalAbsence: 0, 
+                        totalAttendance: 0,
+                        totalAbsence: 0,
                     },
                 ]
                 : [],
@@ -657,6 +657,22 @@ exports.addUser = async (req, res) => {
             newUser.groups[0].totalAttendance = totalAttendance;
             newUser.groups[0].attendancePercentage = attendancePercentage;
 
+            const tasksToAdd = [];
+            for (const lecture of lectures) {
+                for (const task of lecture.tasks) {
+                    tasksToAdd.push({
+                        taskId: task._id,
+                        taskName: task.description_task,
+                        submissionLink: null,
+                        submittedOnTime: null,
+                        submittedAt: null,
+                        score: null,
+                        feedback: null,
+                    });
+                }
+            }
+
+            newUser.groups[0].tasks = tasksToAdd;
             await newUser.save({ session });
         }
 
@@ -674,7 +690,6 @@ exports.addUser = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
-
 
 
 
@@ -1295,8 +1310,6 @@ exports.removeAllowedEmail = async (req, res) => {
 
 
 
-
-
 exports.joinGroupRequest = async (req, res) => {
     try {
         const { groupId } = req.body;
@@ -1311,7 +1324,6 @@ exports.joinGroupRequest = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Ensure user.groups is always an array
         if (!user.groups) {
             user.groups = [];
         }
@@ -1330,26 +1342,42 @@ exports.joinGroupRequest = async (req, res) => {
             const joinRequest = {
                 groupId: groupId,
                 status: 'approved',
+                attendance: [],
+                totalAbsence: 0,
+                totalAttendance: 0,
+                attendancePercentage: 0,
+                tasks: [],
             };
             user.groups.push(joinRequest);
 
             const lectures = await Lectures.find({ group_id: groupId });
+
             for (const lecture of lectures) {
-                const alreadyAttended = user.attendance.some(
-                    (att) => att.lectureId.toString() === lecture._id.toString()
-                );
-                if (!alreadyAttended) {
-                    user.attendance.push({
-                        lectureId: lecture._id,
-                        attendanceStatus: 'absent',
-                        attendedAt: null,
+                user.groups[user.groups.length - 1].attendance.push({
+                    lectureId: lecture._id,
+                    attendanceStatus: 'absent',
+                    attendedAt: null,
+                });
+                user.groups[user.groups.length - 1].totalAbsence += 1;
+
+                for (const task of lecture.tasks) {
+                    user.groups[user.groups.length - 1].tasks.push({
+                        taskId: task._id,
+                        taskName: task.description_task,
+                        submissionLink: null,
+                        submittedOnTime: null,
+                        submittedAt: null,
+                        score: null,
+                        feedback: null,
                     });
-                    user.totalAbsent += 1;
                 }
             }
+            const totalLectures = lectures.length;
+            user.groups[user.groups.length - 1].attendancePercentage = totalLectures > 0
+                ? ((user.groups[user.groups.length - 1].totalAttendance / totalLectures) * 100).toFixed(2)
+                : '0.00';
 
             await user.save();
-
             group.members.push({ user_id: user._id });
 
             group.allowedEmails = group.allowedEmails.filter(email => email !== user.email);
@@ -1414,11 +1442,6 @@ exports.joinGroupRequest = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
-
-
-
-
-
 
 
 exports.getPendingJoinRequestsByGroup = async (req, res) => {
@@ -1508,8 +1531,26 @@ exports.acceptJoinRequest = async (req, res) => {
         userRequest.totalAttendance = totalAttendance;
         userRequest.attendancePercentage = attendancePercentage;
 
-        await user.save(); 
-        await group.save(); 
+        const tasksToAdd = [];
+        for (const lecture of lectures) {
+            for (const task of lecture.tasks) {
+                tasksToAdd.push({
+                    taskId: task._id,
+                    taskName: task.description_task,
+                    submissionLink: null,
+                    submittedOnTime: null,
+                    submittedAt: null,
+                    score: null,
+                    feedback: null,
+                });
+            }
+        }
+
+        userRequest.tasks = tasksToAdd;
+
+        await user.save();
+        await group.save();
+
         const mailOptions = {
             from: process.env.ADMIN_EMAIL,
             to: user.email,
@@ -1545,7 +1586,6 @@ exports.acceptJoinRequest = async (req, res) => {
         return res.status(500).json({ message: 'Server error' });
     }
 };
-
 
 
 
@@ -1732,3 +1772,91 @@ exports.setRoleToPending = async (req, res) => {
     }
 };
 
+
+
+
+
+exports.setRoleToApproved = async (req, res) => {
+    try {
+        const { userId, groupId } = req.params; 
+        const adminId = req.user.id; 
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const adminUser = await User.findById(adminId);
+        if (!adminUser || adminUser.role !== 'admin') {
+            return res.status(403).json({ message: 'You do not have permission to perform this action' });
+        }
+
+        const group = user.groups.find(g => g.groupId.toString() === groupId);
+        if (!group) {
+            return res.status(404).json({ message: 'Group not found in user\'s groups' });
+        }
+
+        if (group.status !== 'pending') {
+            return res.status(400).json({ message: 'Group status is not in pending state' });
+        }
+
+        group.status = 'approved';
+
+        const lectures = await Lectures.find({ group_id: groupId });
+
+        let existingAttendance = group.attendance || [];
+        let existingAbsence = group.totalAbsence || 0;
+        let existingAttendanceCount = group.totalAttendance || 0;
+
+        const coveredLectures = new Set(existingAttendance.map(a => a.lectureId.toString()));
+
+        let newAbsence = 0;
+        const newAttendance = lectures
+            .filter(lecture => !coveredLectures.has(lecture._id.toString())) 
+            .map(lecture => {
+                newAbsence += 1; 
+                return {
+                    lectureId: lecture._id,
+                    attendanceStatus: 'absent',
+                    attendedAt: null, 
+                };
+            });
+
+        group.attendance = [...existingAttendance, ...newAttendance];
+        group.totalAbsence = existingAbsence + newAbsence; 
+        group.totalAttendance = existingAttendanceCount; 
+
+        const totalLectures = lectures.length; 
+        const attendancePercentage = totalLectures > 0
+            ? ((group.totalAttendance / totalLectures) * 100).toFixed(2) 
+            : '0.00';
+
+        group.attendancePercentage = attendancePercentage;
+
+        const tasksToAdd = [];
+        for (const lecture of lectures) {
+            for (const task of lecture.tasks) {
+                tasksToAdd.push({
+                    taskId: task._id,
+                    taskName: task.description_task,
+                    submissionLink: null,
+                    submittedOnTime: null,
+                    submittedAt: null,
+                    score: null,
+                    feedback: null,
+                });
+            }
+        }
+
+        group.tasks = tasksToAdd;
+
+        await user.save();
+
+        return res.status(200).json({
+            message: 'Join request approved successfully',
+            group
+        });
+    } catch (error) {
+        console.error('Error in accepting join request:', error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};

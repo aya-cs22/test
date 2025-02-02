@@ -42,6 +42,7 @@ router.get('/pending-join-requests/:groupId', authMiddleware, userController.get
 
 router.post('/accept-join-request', authMiddleware, userController.acceptJoinRequest);
 router.put('/set-role-to-pending/:userId/:groupId', authMiddleware, userController.setRoleToPending);
+router.put('/set-role-to-approved/:userId/:groupId', authMiddleware, userController.setRoleToApproved);
 
 router.post('/reject-join-request', authMiddleware, userController.rejectJoinRequest);
 

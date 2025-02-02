@@ -14,7 +14,6 @@ const userSchema = new mongoose.Schema({
     unique: true,
     required: true,
     lowercase: true,
-    maxlength: [100, 'Email cannot be longer than 100 characters'],
 
     match: [
       /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
@@ -26,7 +25,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     minlength: [10, 'too short password'],
-    maxlength: [255, 'Password cannot be longer than 255 characters'], 
   },
 
   isVerified: {
@@ -93,7 +91,22 @@ const userSchema = new mongoose.Schema({
       attendancePercentage: {
         type: Number,
         default: 0, 
-      }
+      },
+      tasks: [ // Adding tasks inside the group
+        {
+          taskId: mongoose.Schema.Types.ObjectId,
+          taskName: String,
+          submissionLink: String,
+          submittedOnTime: Boolean,
+          submittedAt: Date,
+          score: Number,
+          feedback: String,
+        },
+      ],
+      totalScore: {
+        type: Number,
+        default: 0, 
+      },
     }
   ],
 
@@ -120,17 +133,6 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
-  tasks: [
-    {
-      lectureId: mongoose.Schema.Types.ObjectId,
-      taskId: mongoose.Schema.Types.ObjectId,
-      submissionLink: String,
-      submittedOnTime: Boolean,
-      submittedAt: Date,
-      score: Number,
-      feedback: String,
-    },
-  ],
 
   // message: {
   //   type: String,

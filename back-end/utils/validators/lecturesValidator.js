@@ -6,9 +6,9 @@ const Lectures = require('../../models/lectures');
 
 const lectureValidator = [
   check('submissions.*.submissionLink')
-    .isLength({ min: 30, max: 150 }).withMessage('Google Drive link must be between 30 and 150 characters')
-    .matches(/^https?:\/\/drive\.google\.com\/.*$/).withMessage('Google Drive link must be a valid Google Drive link'),
-    
+    .matches(/^https?:\/\/(drive\.google\.com\/.*|github\.com\/.*)$/)
+    .withMessage('Link must be a valid Google Drive or GitHub link'),
+
     // code
     check('code')
     .notEmpty().withMessage('Code is required')

@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const PAYMOB_API_KEY = process.env.PAYMOB_API_KEY;
+const PAYMOB_INTEGRATION_ID = process.env.PAYMOB_INTEGRATION_ID ;
 
 const dbConnection = async (retries = 10) => {
   while (retries) {
@@ -22,4 +24,8 @@ const dbConnection = async (retries = 10) => {
   }
 };
 
-module.exports = dbConnection;
+module.exports = {
+  PAYMOB_API_KEY,
+  PAYMOB_INTEGRATION_ID,
+  dbConnection
+};

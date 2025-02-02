@@ -6,8 +6,7 @@ const userValidator = [
     // email
     check('email')
   .isEmail().withMessage('Please enter a valid email address')
-  .normalizeEmail()
-  .isLength({ max: 100 }).withMessage('Email cannot be longer than 100 characters'),
+  .normalizeEmail(),
 //     // name
   check('name')
   .notEmpty().withMessage('Name is required')

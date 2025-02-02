@@ -22,17 +22,16 @@ router.put('/:lectureId/edit-task/:taskId', authMiddleware, lecturesController.u
 router.get('/:lectureId/tasks/:taskId', authMiddleware, lecturesController.getTaskById);
 router.get('/:lectureId/get-tasks', authMiddleware, lecturesController.getAllTasksByLectureId);
 router.post('/:lectureId/submit-task/:taskId', authMiddleware,lecturesValidator,  lecturesController.submitTask);
-router.put('/:lectureId/tasks/:taskId/submissions/:submissionId/evaluate', authMiddleware, lecturesController.evaluateTask);
-router.get('/:lectureId/:taskId/all-user-submit-task', authMiddleware, lecturesController.getAllUserSubmissionsForTask);
-router.get('/:lectureId/:taskId/all-user-not-submit-task', authMiddleware, lecturesController.getUsersNotSubmittedTask);
-router.get('/:groupId/get-user-submissions-for-group', authMiddleware, lecturesController.getUserSubmissionsForGroup);
-router.get('/:groupId/get-user-unsubmissions-for-group', authMiddleware, lecturesController.getUserUnsubmittedTasksForGroup);
+router.put('/:lectureId/tasks/:taskId/submissions/:userId/evaluate', authMiddleware, lecturesController.addScoreAndFeedback);
+router.get('/groups/:groupId/tasks', authMiddleware, lecturesController.getUserTasksByGroupId);
+router.get('/:lectureId/tasks/:taskId/submissions', authMiddleware, lecturesController.getTaskSubmissions);
+
 router.delete('/:lectureId/tasks/:taskId', authMiddleware, lecturesController.deleteTask);
 
 router.get('/:groupId/get-user-attendance-status-in-group', authMiddleware, lecturesController.getUserAttendanceStatusInGroup);
 router.get('/:userId/:groupId/attendance-by-admin', authMiddleware, lecturesController.getUserAttendanceStatusByGroupId);
 router.get('/:lectureId/get-lecture-attendance-details', authMiddleware, lecturesController.getLectureAttendanceDetails);
-
+router.get('/:groupId/:userId/get-user-tasks-in-group', authMiddleware, lecturesController.getUserTasksInGroup);
 
 
 module.exports = router;

@@ -49,6 +49,26 @@ const groupsSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  price: {
+    type: Number,
+    min: 0 
+  },
+
+  course_details: {
+    type: [{
+        title: String,
+        short_description: String, 
+        description: String,
+        image: String 
+    }],
+    default: []
+},
+
+about_course: {
+  type: [String],
+  default: []
+},
+
 });
 groupsSchema.pre('save', async function (next) {
   this.updated_at = Date.now();
