@@ -550,9 +550,9 @@ exports.login = async (req, res) => {
         }
         
 
-        //if (user.role !== 'admin' && user.fingerprint !== fingerprint) {
-     //     return res.status(400).json({ message: 'Fingerprint mismatch. Login denied.' });
-     //   }
+        if (user.role !== 'admin' && user.fingerprint !== fingerprint) {
+            return res.status(400).json({ message: 'Fingerprint mismatch. Login denied.' });
+        }
 
         const token = jwt.sign(
             { id: user._id, role: user.role },
@@ -830,7 +830,10 @@ exports.getPendingUsers = async (req, res) => {
                         userId: user._id,
                         email: user.email,
                         userName: user.name,
-                        start_date: groupDetails.start_date
+                        start_date: groupDetails.start_date,
+                        requestType: group.requestType,
+                        note:group.note,
+
                     });
                 }
             }
@@ -1309,14 +1312,13 @@ exports.removeAllowedEmail = async (req, res) => {
 
 
 
-
 exports.joinGroupRequest = async (req, res) => {
     try {
-        const { groupId } = req.body;
+        const { groupId, requestType, note } = req.body; 
         const userId = req.user.id;
 
-        if (!groupId) {
-            return res.status(400).json({ message: 'groupId is required' });
+        if (!groupId || !requestType) {
+            return res.status(400).json({ message: 'groupId and requestType are required' });
         }
 
         const user = await User.findById(userId);
@@ -1342,16 +1344,17 @@ exports.joinGroupRequest = async (req, res) => {
             const joinRequest = {
                 groupId: groupId,
                 status: 'approved',
+                requestType: requestType,
                 attendance: [],
                 totalAbsence: 0,
                 totalAttendance: 0,
                 attendancePercentage: 0,
+                note,
                 tasks: [],
             };
             user.groups.push(joinRequest);
 
             const lectures = await Lectures.find({ group_id: groupId });
-
             for (const lecture of lectures) {
                 user.groups[user.groups.length - 1].attendance.push({
                     lectureId: lecture._id,
@@ -1372,6 +1375,7 @@ exports.joinGroupRequest = async (req, res) => {
                     });
                 }
             }
+
             const totalLectures = lectures.length;
             user.groups[user.groups.length - 1].attendancePercentage = totalLectures > 0
                 ? ((user.groups[user.groups.length - 1].totalAttendance / totalLectures) * 100).toFixed(2)
@@ -1399,6 +1403,8 @@ exports.joinGroupRequest = async (req, res) => {
             const joinRequest = {
                 groupId: groupId,
                 status: 'pending',
+                requestType: requestType, 
+                note:note,
             };
             user.groups.push(joinRequest);
             await user.save();
@@ -1411,6 +1417,8 @@ exports.joinGroupRequest = async (req, res) => {
                 html: `
                     <p>Hello Admin,</p>
                     <p>The user <strong>${user.name}</strong> (<a href="mailto:${user.email}">${user.email}</a>) has requested to join the group "<strong>${group.title}</strong>".</p>
+                    <p>Request Type: <strong>${requestType}</strong></p>
+                    ${note ? `<p><strong>Note:</strong> ${note}</p>` : ''}
                     <p>Please review the request and take appropriate action:</p>
                     <div style="display: flex; gap: 10px;">
                         <a href="https://api-codeeagles-cpq8.vercel.app/api/users/accept-join-request" 
@@ -1424,6 +1432,7 @@ exports.joinGroupRequest = async (req, res) => {
                             Reject
                         </a>
                     </div>
+
                 `
             };
 
@@ -1442,6 +1451,15 @@ exports.joinGroupRequest = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+
+
+
+
+
+
+
+
 
 
 exports.getPendingJoinRequestsByGroup = async (req, res) => {
@@ -1468,7 +1486,7 @@ exports.getPendingJoinRequestsByGroup = async (req, res) => {
                 userName: user.name,
                 groupName: group.title,
                 groupDate: group.start_date,
-                pendingGroups: user.groups.filter(group => group.status === 'pending' && group.groupId.toString() === groupId)
+                requestType: userGroup ? userGroup.requestType : null, // استخراج requestType إذا وجد
             };
         });
 
@@ -1479,6 +1497,257 @@ exports.getPendingJoinRequestsByGroup = async (req, res) => {
         return res.status(500).json({ message: 'Server error' });
     }
 };
+
+
+exports.acceptSpecialUser = async (req, res) => {
+    try {
+      const { groupId, userId, lecturesSpecial } = req.body; 
+      const adminId = req.user.id;
+  
+      const adminUser = await User.findById(adminId);
+      if (adminUser.role !== 'admin') {
+        return res.status(403).json({ message: 'You do not have permission to perform this action' });
+      }
+  
+      const user = await User.findById(userId);
+      const group = await Groups.findById(groupId);
+  
+      if (!user || !group) {
+        return res.status(404).json({ message: 'User or Group not found' });
+      }
+  
+      const userRequest = user.groups.find((g) => g.groupId.toString() === groupId);
+      if (!userRequest || userRequest.status !== 'pending') {
+        return res.status(400).json({ message: 'No pending request found for this group' });
+      }
+  
+      userRequest.status = 'special';
+  
+      if (lecturesSpecial && Array.isArray(lecturesSpecial)) {
+        userRequest.lecturesSpecial = lecturesSpecial; 
+  
+        const attendanceData = lecturesSpecial.map((lectureId) => ({
+          lectureId,
+          attendanceStatus: 'absent',
+          attendedAt: null,
+        }));
+  
+        userRequest.attendance = attendanceData;
+  
+        userRequest.totalAbsence = lecturesSpecial.length;
+        userRequest.totalAttendance = 0; 
+        userRequest.attendancePercentage = 0;
+  
+        const tasksToAdd = [];
+        for (const lectureId of lecturesSpecial) { 
+          const lecture = await Lectures.findById(lectureId);
+          if (lecture && Array.isArray(lecture.tasks)) {
+            for (const task of lecture.tasks) {
+              tasksToAdd.push({
+                taskId: task._id,
+                taskName: task.description_task,
+                submissionLink: null,
+                submittedOnTime: null,
+                submittedAt: null,
+                score: null,
+                feedback: null,
+              });
+            }
+          }
+        }
+        userRequest.tasks = tasksToAdd;
+      }
+  
+      await user.save();
+      await group.save();
+  
+      return res.status(200).json({ message: 'User has been marked as special and granted access to selected lectures.' });
+    } catch (error) {
+      console.error('Error accepting special user:', error);
+      return res.status(500).json({ message: 'Server error' });
+    }
+  };
+  
+  
+  
+  exports.updateSpecialUserLectures = async (req, res) => {
+    try {
+        const { groupId, userId, lecturesToAdd, lecturesToRemove } = req.body;
+        const adminId = req.user.id;
+
+        const adminUser = await User.findById(adminId);
+        if (adminUser.role !== 'admin') {
+            return res.status(403).json({ message: 'You do not have permission to perform this action' });
+        }
+
+        const user = await User.findById(userId);
+        const group = await Groups.findById(groupId);
+
+        if (!user || !group) {
+            return res.status(404).json({ message: 'User or Group not found' });
+        }
+
+        const userRequest = user.groups.find((g) => g.groupId.toString() === groupId);
+        if (!userRequest || userRequest.status !== 'special') {
+            return res.status(400).json({ message: 'User is not marked as special for this group' });
+        }
+
+        let currentLectures = userRequest.lecturesSpecial || [];
+
+        if (lecturesToAdd && Array.isArray(lecturesToAdd)) {
+            currentLectures = [...currentLectures, ...lecturesToAdd];
+        }
+
+        if (lecturesToRemove && Array.isArray(lecturesToRemove)) {
+            currentLectures = currentLectures.filter(lectureId => !lecturesToRemove.includes(lectureId.toString()));
+        }
+
+        userRequest.lecturesSpecial = currentLectures;
+
+        const attendanceData = currentLectures.map((lectureId) => {
+            const existingAttendance = userRequest.attendance.find(att => att.lectureId.toString() === lectureId.toString());
+            return {
+                lectureId,
+                attendanceStatus: existingAttendance ? existingAttendance.attendanceStatus : 'absent',
+                attendedAt: existingAttendance ? existingAttendance.attendedAt : null,
+            };
+        });
+        userRequest.attendance = attendanceData;
+
+        let tasksToAdd = [];
+        for (const lectureId of currentLectures) {
+            const lecture = await Lectures.findById(lectureId);
+            if (lecture && Array.isArray(lecture.tasks)) {
+                for (const task of lecture.tasks) {
+                    tasksToAdd.push({
+                        taskId: task._id,
+                        taskName: task.description_task,
+                        submissionLink: null,
+                        submittedOnTime: null,
+                        submittedAt: null,
+                        score: null,
+                        feedback: null,
+                    });
+                }
+            }
+        }
+        userRequest.tasks = tasksToAdd;
+
+        const totalAttendance = userRequest.attendance.filter(att => att.attendanceStatus === 'present').length;
+        const totalAbsence = userRequest.attendance.filter(att => att.attendanceStatus === 'absent').length;
+
+        userRequest.totalAttendance = totalAttendance;
+        userRequest.totalAbsence = totalAbsence;
+
+        userRequest.attendancePercentage = (totalAttendance / (totalAttendance + totalAbsence)) * 100;
+
+        const totalScore = userRequest.tasks.reduce((sum, task) => sum + (task.score || 0), 0);
+        userRequest.totalScore = totalScore;
+
+        await user.save();
+        await group.save();
+
+        return res.status(200).json({ message: 'Special user lectures have been updated.' });
+
+    } catch (error) {
+        console.error('Error updating special user lectures:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
+};
+
+
+
+  
+
+  
+  
+  
+
+
+exports.approveLectureAttendance = async (req, res) => {
+    try {
+        const { userId, groupId } = req.params;
+        const adminId = req.user.id;
+
+        const adminUser = await User.findById(adminId);
+        if (adminUser.role !== 'admin') {
+            return res.status(403).json({ message: 'You do not have permission to perform this action' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const request = user.lectureAttendanceRequests.find(req => req.groupId.toString() === groupId);
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        request.status = 'approved';
+        request.approvedLectures = [];
+        await user.save();
+
+        return res.status(200).json({ message: 'Lecture attendance request approved successfully (awaiting lecture selection)' });
+    } catch (error) {
+        console.error('Error approving lecture attendance:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+
+
+
+
+
+exports.getPendingJoinRequestsByGroup = async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Access denied. Admins only.' });
+        }
+
+        const { groupId } = req.params;
+
+        const usersWithPendingRequests = await User.find({
+            "groups.groupId": groupId,
+            "groups.status": "pending"
+        });
+
+        if (usersWithPendingRequests.length === 0) {
+            return res.status(404).json({ message: 'No pending join requests found for this group' });
+        }
+
+        const group = await Groups.findById(groupId)
+        const pendingRequests = usersWithPendingRequests.map(user => {
+            return {
+                userId: user._id,
+                userName: user.name,
+                groupName: group.title,
+                groupDate: group.start_date,
+                pendingGroups: user.groups
+                    .filter(group => group.status === 'pending' && group.groupId.toString() === groupId)
+                    .map(group => ({
+                        status: group.status,
+                        requestType: group.requestType  // إضافة الـ requestType هنا
+                    })
+                )
+            };
+        });
+
+        return res.status(200).json({ pendingRequests });
+
+    } catch (error) {
+        console.error('Error in fetching pending join requests:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
+};
+
+
+
+
+
+
+
 
 
 
@@ -1662,6 +1931,7 @@ exports.rejectJoinRequest = async (req, res) => {
         return res.status(500).json({ message: 'Server error' });
     }
 };
+
 
 
 exports.leaveGroup = async (req, res) => {
@@ -1860,3 +2130,5 @@ exports.setRoleToApproved = async (req, res) => {
         return res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
+
+

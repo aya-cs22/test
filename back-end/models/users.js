@@ -58,8 +58,16 @@ const userSchema = new mongoose.Schema({
       },
       status: {
         type: String,
-        enum: ['pending', 'approved', 'rejected'],
+        enum: ['pending', 'approved', 'rejected', 'special'],
         default: 'pending',
+      },
+      requestType: { 
+        type: String,
+        enum: ['join', 'invite'], 
+        default: 'join', 
+      },
+      note:{
+        type:String,
       },
       attendance: [
         {
@@ -79,6 +87,14 @@ const userSchema = new mongoose.Schema({
           }
         }
       ],
+
+      lecturesSpecial: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Lectures', 
+        }
+      ],
+
       totalAttendance: {
         type: Number,
         default: 0,

@@ -7,16 +7,27 @@ const authenticate = async (req, res, next) => {
   // const token = req.cookies.token
 
   if (!token) {
-    return res.status(401).json({ message: 'Access denied.' });
+    return res.status(401).json({ message: 'Access denied. ' });
   }
 
   try {
+    // التحقق من التوكن
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
 
     if (!user) {
       return res.status(401).json({ message: 'User not found.' });
     }
+
+    // // التحقق من صلاحية lastToken
+    // if (user.lastToken && user.lastToken !== token) {
+    //   return res.status(401).json({ message: 'Token has expired. Please log in again.' });
+    // }
+
+    // // التحقق من أن tokenVersion متطابق
+    // if (decoded.tokenVersion !== user.tokenVersion) {
+    //   return res.status(401).json({ message: 'Token has expired. Please log in again.' });
+    // }
 
     // التحقق من أن resetPasswordExpiry ليس قد انتهى
     if (user.resetPasswordExpiry && Date.now() > user.resetPasswordExpiry) {

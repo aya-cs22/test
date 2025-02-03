@@ -17,7 +17,7 @@ const nodemailer = require('nodemailer');
 // creat group by admin
 exports.creatGroups = async (req, res) => {
     try {
-        const { title, type_course, location, start_date, end_date , price, course_details, about_course } = req.body;
+        const { title, type_course, location, start_date, end_date , price, course_details, about_course, instructorName,imageCourse  } = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Acess denied' });
         }
@@ -34,7 +34,9 @@ exports.creatGroups = async (req, res) => {
             end_date,
             price ,
             course_details: course_details || [],
-            about_course: about_course || []
+            about_course: about_course || [],
+            instructorName,
+            imageCourse,
         });
         await groups.save();
         res.status(201).json(groups);
@@ -45,10 +47,28 @@ exports.creatGroups = async (req, res) => {
 };
 
 // get all groups
+
 exports.getAllGroups = async (req, res) => {
     try {
-        const groups = await Groups.find().populate('type_course');
-        res.status(200).json(groups)
+        const isAdmin = req.user && req.user.role === 'admin'; 
+        console.log(req.user)
+        const groups = await Groups.find().select(isAdmin ? {} : 'title type_course location start_date end_date course_details about_course  instructorName imageCourse');
+
+        res.status(200).json(groups);
+    } catch (error) {
+        res.status(500).json({ message: 'server error', error: error.message });
+    }
+};
+
+
+// get all groups
+exports.getAllGroupsByAdmin = async (req, res) => {
+    try {
+        const isAdmin = req.user && req.user.role === 'admin'; 
+        console.log(req.user)
+        const groups = await Groups.find().select(isAdmin ? {} : 'title type_course location start_date end_date');
+
+        res.status(200).json(groups);
     } catch (error) {
         res.status(500).json({ message: 'server error', error: error.message });
     }
@@ -59,18 +79,25 @@ exports.getAllGroups = async (req, res) => {
 
 exports.getGroupsById = async (req, res) => {
     try {
-        console.log("User groups:", req.user.groups);
+        const group = await Groups.findById(req.params.groupId).select(
+            'title type_course location start_date end_date course_details about_course instructorName imageCourse'
+        );
 
-        if (req.user.role === 'admin') {
-            const group = await Groups.findById(req.params.groupId);
-            if (!group) {
-                return res.status(404).json({ message: 'Group not found' });
-            }
-            return res.status(200).json(group);
+        if (!group) {
+            return res.status(404).json({ message: 'Group not found' });
         }
 
-        if (!req.user.groups || req.user.groups.length === 0) {
-            return res.status(403).json({ message: 'You are not a member of any group' });
+        return res.status(200).json(group);
+    } catch (error) {
+        console.error('Error fetching group:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+exports.getGroupByIdAdmin = async (req, res) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Access denied. Admins only.' });
         }
 
         const group = await Groups.findById(req.params.groupId);
@@ -79,24 +106,7 @@ exports.getGroupsById = async (req, res) => {
             return res.status(404).json({ message: 'Group not found' });
         }
 
-        console.log('Group from DB:', group);
-        const approvedGroups = req.user.groups.filter(group => group.status === 'approved');
-
-        console.log("Approved groups:", approvedGroups);
-
-        if (approvedGroups.length === 0) {
-            return res.status(403).json({ message: 'You do not have an approved membership in any group' });
-        }
-        const userInApprovedGroup = approvedGroups.find(
-            approvedGroup => approvedGroup.groupId.toString() === req.params.groupId
-        );
-
-        if (!userInApprovedGroup) {
-            return res.status(403).json({ message: 'Your membership is not approved in this group' });
-        }
-
         return res.status(200).json(group);
-
     } catch (error) {
         console.error('Error fetching group:', error);
         res.status(500).json({ message: 'Server error' });
@@ -106,11 +116,19 @@ exports.getGroupsById = async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
 // update group by id
 exports.updateGroupsById = async (req, res) => {
     try {
         const { groupId } = req.params;
-        const { title, type_course, location, start_date, end_date, price, course_details, about_course } = req.body;
+        const { title, type_course, location, start_date, end_date, price, course_details, about_course ,  instructorName,imageCourse } = req.body;
 
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Access denied' });
@@ -124,7 +142,9 @@ exports.updateGroupsById = async (req, res) => {
             end_date: end_date,
             price: price,
             course_details: course_details,
-            about_course :about_course
+            about_course :about_course,
+            instructorName: instructorName,
+            imageCourse: imageCourse,
         };
 
         const updatedGroup = await Groups.findByIdAndUpdate(groupId, updateGroupsData, { new: true, runValidators: true });
