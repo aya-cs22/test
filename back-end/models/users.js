@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
+    minlength:[3, 'Name cannot be smaller than 3 characters'],
     maxlength: [50, 'Name cannot be longer than 50 characters'], 
   },
   email: {
@@ -148,21 +149,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-
-
-  // message: {
-  //   type: String,
-  // },
-
-  lastToken: {
-    type: String,
-    default: null,
-  },
-  // tokenVersion: {
-  //   type: Number,
-  //   default: 0,
-  // },
-
+  refreshToken:{
+    type:String,
+    default:null
+},
+ 
   fingerprint: {
     type: String,
     required: false

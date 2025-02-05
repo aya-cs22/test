@@ -73,12 +73,13 @@ exports.createLectures = async (req, res) => {
 
 exports.attendLecture = async (req, res) => {
   try {
+    console.log("start attend")
     const { lectureId, code } = req.body;
     const userId = req.user.id;
 
     const lecture = await Lectures.findById(lectureId);
     if (!lecture) {
-      return res.status(404).json({ message: 'Lecture not found' });
+      return res.status(404).json({ message: 'Lecture not found'});
     }
 
     if (lecture.code !== code) {
@@ -87,15 +88,25 @@ exports.attendLecture = async (req, res) => {
 
     const user = await User.findById(userId);
     const groupUser = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
-    if (!groupUser || groupUser.status !== 'approved') {
-      return res.status(403).json({ message: 'User not approved in this group' });
+
+    if (!groupUser) {
+      return res.status(403).json({ message: 'The user does not exist in this group'});
+    }
+
+    if (groupUser.status === 'approved') {
+    } else if (groupUser.status === 'special') {
+      if (!groupUser.lecturesSpecial.some(specialLecture => specialLecture.toString() === lectureId)) {
+        return res.status(403).json({ message: 'The lecture is not one of your lectures.' });
+      }
+    } else {
+      return res.status(403).json({ message: 'The user is not approved or special in this group' });
     }
 
     const attendanceIndex = groupUser.attendance.findIndex(att => att.lectureId.toString() === lectureId);
     if (attendanceIndex !== -1) {
       const attendance = groupUser.attendance[attendanceIndex];
       if (attendance.attendanceStatus === 'present') {
-        return res.status(400).json({ message: 'User already attended this lecture' });
+        return res.status(400).json({ message: 'The user has already attended this lecture' });
       }
 
       attendance.attendanceStatus = 'present';
@@ -125,74 +136,17 @@ exports.attendLecture = async (req, res) => {
     await user.save();
 
     res.status(200).json({
-      message: 'Attendance recorded successfully',
-      attendancePercentage: groupUser.attendancePercentage.toFixed(2), 
+      message: 'Attendees have been registered successfully',
+      attendancePercentage: groupUser.attendancePercentage.toFixed(2),
     });
   } catch (error) {
-    console.error('Error attending lecture:', error);
+    console.error('An error occurred while registering attendance:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
 
 
-
-
-exports.getUserAttendanceStatusInGroup = async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const userId = req.user.id;
-
-    const userGroup = await User.findOne(
-      { _id: userId, 'groups.groupId': groupId },
-      { 'groups.$': 1 }
-    );
-
-    if (!userGroup || userGroup.groups[0].status !== 'approved') {
-      return res.status(403).json({ message: 'User not approved in this group' });
-    }
-
-    const lectures = await Lectures.find({ group_id: groupId });
-
-    if (!lectures || lectures.length === 0) {
-      return res.status(404).json({ message: 'No lectures found for this group' });
-    }
-
-    let attendedLecturesCount = 0;
-    let notAttendedLecturesCount = 0;
-
-    const response = lectures.map((lecture) => {
-      const attendee = lecture.attendees.find(att => att.userId.toString() === userId);
-      const isAttended = attendee ? true : false;
-
-      if (isAttended) {
-        attendedLecturesCount++;
-      } else {
-        notAttendedLecturesCount++;
-      }
-
-      return {
-        lectureId: lecture._id,
-        title: lecture.title,
-        attendedAt: isAttended ? attendee.attendedAt : 'N/A',
-        status: isAttended ? 'present' : 'absent',
-      };
-    });
-
-    const attendancePercentage = ((attendedLecturesCount / lectures.length) * 100).toFixed(2);
-
-    res.status(200).json({
-      groupId,
-      attendedLecturesCount,
-      notAttendedLecturesCount,
-      attendancePercentage,
-      lectures: response,
-    });
-  } catch (error) {
-    console.error('Error fetching user attendance:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
 
 // Update Lecture
 exports.updateLecturesById = async (req, res) => {
@@ -226,20 +180,32 @@ exports.updateLecturesById = async (req, res) => {
 
 
 
-// Get Lecture by ID
 exports.getLectureById = async (req, res) => {
   try {
     const { lectureId } = req.params;
+    let lecture;
 
     if (req.user.role === 'admin') {
-      const lecture = await Lectures.findById(lectureId).populate('group_id');
-      if (!lecture) {
-        return res.status(404).json({ message: 'Lecture not found' });
+      lecture = await Lectures.findById(lectureId)
+        .populate('group_id', 'title')
+        .select('group_id title description article resources code tasks attendees attendanceCount');
+    } else {
+      lecture = await Lectures.findById(lectureId)
+        .populate('group_id', 'title')
+        .select('group_id title description article resources code tasks');
+
+      if (lecture) {
+        lecture = lecture.toObject();
+
+        if (lecture.tasks) {
+          lecture.tasks = lecture.tasks.map(task => {
+            delete task.submissions; 
+            return task;
+          });
+        }
       }
-      return res.status(200).json({ lecture });
     }
 
-    const lecture = await Lectures.findById(lectureId).populate('group_id');
     if (!lecture) {
       return res.status(404).json({ message: 'Lecture not found' });
     }
@@ -247,11 +213,18 @@ exports.getLectureById = async (req, res) => {
     const user = req.user;
     const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id._id.toString());
 
-    if (!userGroup || userGroup.status !== 'approved') {
-      return res.status(403).json({ message: 'Access denied, user not approved in the group' });
+    if (!userGroup) {
+      return res.status(403).json({ message: 'Access denied, user not in this group' });
+    }
+
+    if (userGroup.status === 'special') {
+      if (!userGroup.lecturesSpecial.includes(lectureId)) {
+        return res.status(403).json({ message: 'Access denied, this lecture is not part of your special lectures' });
+      }
     }
 
     return res.status(200).json({ lecture });
+
   } catch (error) {
     console.error('Error getting lecture:', error);
     res.status(500).json({ message: 'Server error' });
@@ -260,33 +233,59 @@ exports.getLectureById = async (req, res) => {
 
 
 
-// Get Lectures by group_id
 
 exports.getLecturesByGroupId = async (req, res) => {
   try {
     const { groupId } = req.params;
-
-    if (req.user.role === 'admin') {
-      const lectures = await Lectures.find({ group_id: groupId }).populate('group_id');
-      if (!lectures || lectures.length === 0) {
-        return res.status(404).json({ message: 'No lectures found for this group' });
-      }
-      return res.status(200).json({ lectures });
-    }
+    let lectures;
 
     const user = req.user;
-    const approvedGroup = user.groups.find(group => group.groupId.toString() === groupId && group.status === 'approved');
+    const approvedGroup = user.groups.find(group => group.groupId.toString() === groupId && (group.status === 'approved' || group.status === 'special'));
 
     if (!approvedGroup) {
       return res.status(403).json({ message: 'Access denied, user not approved in this group' });
     }
 
-    const lectures = await Lectures.find({ group_id: groupId }).populate('group_id');
+    if (req.user.role === 'admin') {
+      lectures = await Lectures.find({ group_id: groupId })
+        .populate('group_id', 'title')
+        .select('group_id title description article resources code tasks attendees attendanceCount'); 
+    } else { 
+      lectures = await Lectures.find({ group_id: groupId })
+        .populate('group_id', 'title')
+        .select('group_id title description article resources code tasks'); 
+
+      if (lectures && lectures.length > 0) {
+        lectures = lectures.map(lecture => {
+          const lectureObject = lecture.toObject();
+
+          if (lectureObject.tasks) {
+            lectureObject.tasks = lectureObject.tasks.map(task => {
+              delete task.submissions;
+              return task;
+            });
+          }
+          delete lectureObject.attendees;
+          delete lectureObject.attendanceCount;
+
+
+          return lectureObject;
+        });
+      }
+
+      if (approvedGroup.status === 'special') { 
+        lectures = lectures.filter(lecture =>
+          user.groups.find(group => group.lecturesSpecial.includes(lecture._id.toString()))
+        );
+      }
+    }
+
     if (!lectures || lectures.length === 0) {
       return res.status(404).json({ message: 'No lectures found for this group' });
     }
 
     return res.status(200).json({ lectures });
+
   } catch (error) {
     console.error('Error getting lectures by group:', error);
     res.status(500).json({ message: 'Server error' });
@@ -294,72 +293,6 @@ exports.getLecturesByGroupId = async (req, res) => {
 };
 
 
-// attend user
-exports.attendLecture = async (req, res) => {
-  try {
-    const { lectureId, code } = req.body;
-    const userId = req.user.id;
-
-    const lecture = await Lectures.findById(lectureId);
-    if (!lecture) {
-      return res.status(404).json({ message: 'Lecture not found' });
-    }
-
-    if (lecture.code !== code) {
-      return res.status(400).json({ message: 'Invalid code' });
-    }
-
-    const user = await User.findById(userId);
-    const groupUser = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
-    if (!groupUser || groupUser.status !== 'approved') {
-      return res.status(403).json({ message: 'User not approved in this group' });
-    }
-
-    const attendanceIndex = groupUser.attendance.findIndex(att => att.lectureId.toString() === lectureId);
-    if (attendanceIndex !== -1) {
-      const attendance = groupUser.attendance[attendanceIndex];
-      if (attendance.attendanceStatus === 'present') {
-        return res.status(400).json({ message: 'User already attended this lecture' });
-      }
-
-      attendance.attendanceStatus = 'present';
-      attendance.attendedAt = Date.now();
-    } else {
-      groupUser.attendance.push({
-        lectureId,
-        attendanceStatus: 'present',
-        attendedAt: Date.now(),
-      });
-    }
-
-    // Update total attendance and absence
-    groupUser.totalAttendance = (groupUser.totalAttendance || 0) + 1;
-    groupUser.totalAbsence = Math.max((groupUser.totalAbsence || 0) - 1, 0);
-
-    // Calculate the correct attendance percentage based on the updated values
-    const totalLectures = groupUser.totalAttendance + groupUser.totalAbsence;
-    if (totalLectures > 0) {
-      groupUser.attendancePercentage = (groupUser.totalAttendance / totalLectures) * 100;
-    } else {
-      groupUser.attendancePercentage = 0;
-    }
-
-    // Update lecture attendance count
-    lecture.attendees.push({ userId });
-    lecture.attendanceCount = (lecture.attendanceCount || 0) + 1;
-
-    await lecture.save();
-    await user.save();
-
-    res.status(200).json({
-      message: 'Attendance recorded successfully',
-      attendancePercentage: groupUser.attendancePercentage.toFixed(2), // Show percentage with two decimal places
-    });
-  } catch (error) {
-    console.error('Error attending lecture:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
 
 
 
@@ -445,87 +378,6 @@ exports.getUsersNotAttendedLecture = async (req, res) => {
 
 
 
-// exports.getUserAttendedLecturesInGroup = async (req, res) => {
-//   try {
-//     const { groupId } = req.params;
-//     const userId = req.user.id;
-
-//     const lectures = await Lectures.find({ group_id: groupId })
-//       .populate('attendees.userId', 'name email')
-//       .select('title attendees');
-
-//     if (!lectures || lectures.length === 0) {
-//       return res.status(404).json({ message: 'No lectures found for this group' });
-//     }
-
-//     // التحقق من الحضور داخل الـ `groups.attendance`
-//     const attendedLectures = lectures.filter((lecture) => {
-//       return lecture.attendees.some((attendee) => 
-//         attendee.userId._id.toString() === userId &&
-//         attendee.attendanceStatus === 'present'
-//       );
-//     });
-
-//     if (attendedLectures.length === 0) {
-//       return res.status(404).json({ message: 'User has not attended any lectures in this group' });
-//     }
-
-//     const response = attendedLectures.map((lecture) => ({
-//       title: lecture.title,
-//       attendedAt: lecture.attendees.find(
-//         (attendee) => attendee.userId._id.toString() === userId
-//       )?.attendedAt || 'N/A',
-//     }));
-
-//     res.status(200).json({ attendedLectures: response });
-//   } catch (error) {
-//     console.error('Error fetching attended lectures:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// };
-
-
-// exports.getUserNotAttendedLecturesInGroup = async (req, res) => {
-//   try {
-//     const { groupId } = req.params;
-//     const userId = req.user.id;
-
-//     const lectures = await Lectures.find({ group_id: groupId })
-//       .populate('attendees.userId', 'name email')
-//       .select('title attendees');
-
-//     if (!lectures || lectures.length === 0) {
-//       return res.status(404).json({ message: 'No lectures found for this group' });
-//     }
-
-//     const notAttendedLectures = lectures.filter((lecture) => {
-//       return !lecture.attendees.some((attendee) => 
-//         attendee.userId._id.toString() === userId &&
-//         attendee.attendanceStatus === 'present'
-//       );
-//     });
-
-//     if (notAttendedLectures.length === 0) {
-//       return res.status(404).json({ message: 'User has attended all lectures in this group' });
-//     }
-
-//     const response = notAttendedLectures.map((lecture) => ({
-//       title: lecture.title,
-//       scheduledAt: lecture.created_at,
-//     }));
-
-//     res.status(200).json({ notAttendedLectures: response });
-//   } catch (error) {
-//     console.error('Error fetching non-attended lectures:', error);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// };
-
-
-
-
-// للحصول على تفاصيل الحضور الخاصة بالمستخدم في الجروب
-
 
 
 exports.getUserAttendanceStatusInGroup = async (req, res) => {
@@ -538,13 +390,24 @@ exports.getUserAttendanceStatusInGroup = async (req, res) => {
       { 'groups.$': 1 }
     );
 
-    if (!userGroup || userGroup.groups[0].status !== 'approved') {
-      return res.status(403).json({ message: 'User not approved in this group' });
+    if (!userGroup || !(userGroup.groups[0].status === 'approved' || userGroup.groups[0].status === 'special')) {
+      return res.status(403).json({ message: 'User not approved or not in special status in this group' });
     }
 
-    const lectures = await Lectures.find({ group_id: groupId })
+    let lectures;
+
+    if (userGroup.groups[0].status === 'special') {
+      lectures = await Lectures.find({ 
+        group_id: groupId,
+        _id: { $in: userGroup.groups[0].lecturesSpecial } 
+      })
       .populate('attendees.userId', 'name email')
       .select('title attendees');
+    } else {
+      lectures = await Lectures.find({ group_id: groupId })
+      .populate('attendees.userId', 'name email')
+      .select('title attendees');
+    }
 
     if (!lectures || lectures.length === 0) {
       return res.status(404).json({ message: 'No lectures found for this group' });
@@ -597,7 +460,7 @@ exports.getUserAttendanceStatusInGroup = async (req, res) => {
 exports.getUserAttendanceStatusByGroupId = async (req, res) => {
   try {
     const { userId, groupId } = req.params;
-    const adminId = req.user.id; 
+    const adminId = req.user.id;
     const adminUser = await User.findById(adminId);
     if (!adminUser || adminUser.role !== 'admin') {
       return res.status(403).json({ message: 'Only admins can access this information' });
@@ -608,12 +471,16 @@ exports.getUserAttendanceStatusByGroupId = async (req, res) => {
       return res.status(404).json({ message: 'No groups found for this user' });
     }
 
-    const isApprovedGroup = user.groups.some(
-      group => group.groupId.toString() === groupId && group.status === 'approved'
-    );
+    const userGroup = user.groups.find(group => group.groupId.toString() === groupId);
+    if (!userGroup) {
+      return res.status(404).json({ message: 'User is not in this group' });
+    }
 
-    if (!isApprovedGroup) {
-      return res.status(404).json({ message: 'User is not approved in this group' });
+    const isSpecial = userGroup.status === 'special';
+    const isApproved = userGroup.status === 'approved';
+    
+    if (!isSpecial && !isApproved) {
+      return res.status(403).json({ message: 'User is not approved or special in this group' });
     }
 
     const group = await Groups.findById(groupId).select('title');
@@ -621,9 +488,16 @@ exports.getUserAttendanceStatusByGroupId = async (req, res) => {
       return res.status(404).json({ message: 'Group not found' });
     }
 
-    const lectures = await Lectures.find({ group_id: groupId })
-      .populate('attendees.userId', 'title email')
-      .select('title attendees group_id created_at');
+    let lectures;
+    if (isSpecial) {
+      lectures = await Lectures.find({ _id: { $in: userGroup.lecturesSpecial } })
+        .populate('attendees.userId', 'title email')
+        .select('title attendees group_id created_at');
+    } else {
+      lectures = await Lectures.find({ group_id: groupId })
+        .populate('attendees.userId', 'title email')
+        .select('title attendees group_id created_at');
+    }
 
     if (!lectures || lectures.length === 0) {
       return res.status(404).json({ message: 'No lectures found for this group' });
@@ -631,7 +505,7 @@ exports.getUserAttendanceStatusByGroupId = async (req, res) => {
 
     const groupedLectures = {
       groupId,
-      groupName: group.title, 
+      groupName: group.title,
       groupLectures: [],
       attendedLecturesCount: 0,
       notAttendedLecturesCount: 0,
@@ -670,6 +544,9 @@ exports.getUserAttendanceStatusByGroupId = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+
 
 exports.getLectureAttendanceDetails = async (req, res) => {
   try {
@@ -716,10 +593,6 @@ exports.getLectureAttendanceDetails = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
-
-
-
 
 
 
@@ -779,8 +652,6 @@ exports.deleteLecturesById = async (req, res) => {
 
 
 
-
-
 exports.createTaskInLecture = async (req, res) => {
   try {
     const { lectureId } = req.params;
@@ -813,13 +684,14 @@ exports.createTaskInLecture = async (req, res) => {
     }
 
     const users = await User.find({ 'groups.groupId': lecture.group_id });
-    const approvedUsers = users.filter(user => {
+    const approvedOrSpecialUsers = users.filter(user => {
       return user.groups.some(group =>
-        group.groupId.toString() === lecture.group_id.toString() && group.status === 'approved'
+        group.groupId.toString() === lecture.group_id.toString() &&
+        (group.status === 'approved' || group.status === 'special')
       );
     });
 
-    for (const user of approvedUsers) {
+    for (const user of approvedOrSpecialUsers) {
       const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
       if (userGroup) {
         userGroup.tasks.push({
@@ -835,10 +707,10 @@ exports.createTaskInLecture = async (req, res) => {
       }
     }
 
-    const emailAddresses = approvedUsers.map(user => user.email);
+    const emailAddresses = approvedOrSpecialUsers.map(user => user.email);
 
     if (emailAddresses.length === 0) {
-      console.log('No approved users to notify');
+      console.log('No approved or special users to notify');
     } else {
       emailAddresses.forEach(async (email) => {
         const mailOptions = {
@@ -1005,8 +877,15 @@ exports.getTaskById = async (req, res) => {
     const user = req.user;
     const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id._id.toString());
 
-    if (!userGroup || userGroup.status !== 'approved') {
-      return res.status(403).json({ message: 'Access denied, user not approved in the group' });
+    if (!userGroup || (userGroup.status !== 'approved' && userGroup.status !== 'special')) {
+      return res.status(403).json({ message: 'Access denied, user not approved or special in the group' });
+    }
+
+    if (userGroup.status === 'special') {
+      const specialLecture = userGroup.lecturesSpecial.find(lectureId => lectureId.toString() === lecture._id.toString());
+      if (!specialLecture) {
+        return res.status(403).json({ message: 'Access denied, this lecture is not part of your special lectures' });
+      }
     }
 
     const task = lecture.tasks.id(taskId);
@@ -1023,22 +902,33 @@ exports.getTaskById = async (req, res) => {
 
 
 
-
 exports.getAllTasksByLectureId = async (req, res) => {
   try {
     const { lectureId } = req.params;
 
     if (req.user.role !== 'admin') {
       const user = req.user;
-      const lecture = await Lectures.findById(lectureId);
+      const lecture = await Lectures.findById(lectureId).populate('group_id');
 
       if (!lecture) {
         return res.status(404).json({ message: 'Lecture not found' });
       }
 
       const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id._id.toString());
-      if (!userGroup || userGroup.status !== 'approved') {
-        return res.status(403).json({ message: 'Access denied, user not approved in the group' });
+
+      if (!userGroup) {
+        return res.status(403).json({ message: 'Access denied, user is not part of this group' });
+      }
+
+      if (userGroup.status === 'special') {
+        const specialLecture = userGroup.lecturesSpecial.find(lectureId => lectureId.toString() === lecture._id.toString());
+        if (!specialLecture) {
+          return res.status(403).json({ message: 'Access denied, this lecture is not part of your special lectures' });
+        }
+      }
+
+      if (userGroup.status !== 'approved' && userGroup.status !== 'special') {
+        return res.status(403).json({ message: 'Access denied, user not approved or special in the group' });
       }
     }
 
@@ -1079,9 +969,9 @@ exports.submitTask = async (req, res) => {
     }
 
     const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
-    if (!userGroup || userGroup.status !== 'approved') {
-      return res.status(403).json({ message: 'User is not approved in this group' });
-    }
+    // if (!userGroup || userGroup.status !== 'approved') {
+    //   return res.status(403).json({ message: 'User is not approved in this group' });
+    // }
 
     if (currentDate > new Date(task.end_date)) {
       return res.status(403).json({ message: 'Task submission is no longer allowed as the deadline has passed' });
@@ -1147,6 +1037,7 @@ exports.submitTask = async (req, res) => {
 
 
 
+
 exports.getUserTasksInGroup = async (req, res) => {
   try {
     const { groupId, userId } = req.params;
@@ -1181,6 +1072,13 @@ exports.getUserTasksInGroup = async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+
+
+
+
+
 
 
 const updateTotalScore = async (userId, groupId) => {
@@ -1246,9 +1144,9 @@ exports.addScoreAndFeedback = async (req, res) => {
     }
 
     const userGroup = user.groups.find(group => group.groupId.toString() === lecture.group_id.toString());
-    if (!userGroup || userGroup.status !== 'approved') {
-      return res.status(403).json({ message: 'User is not approved in this group' });
-    }
+    // if (!userGroup || userGroup.status !== 'approved') {
+    //   return res.status(403).json({ message: 'User is not approved in this group' });
+    // }
 
     const userTask = userGroup.tasks.find(t => t.taskId.toString() === taskId);
     if (!userTask) {
@@ -1286,9 +1184,14 @@ exports.getUserTasksByGroupId = async (req, res) => {
       return res.status(404).json({ message: 'User is not part of this group' });
     }
 
-    const lectures = await Lectures.find({ group_id: groupId });
+    const userLectures = userGroup.lecturesSpecial; // فقط المحاضرات التي في lecturesSpecial
+    if (!userLectures || userLectures.length === 0) {
+      return res.status(404).json({ message: 'No special lectures found for this group' });
+    }
+
+    const lectures = await Lectures.find({ _id: { $in: userLectures } });
     if (!lectures || lectures.length === 0) {
-      return res.status(404).json({ message: 'No lectures found for this group' });
+      return res.status(404).json({ message: 'No lectures found for this user in special lectures' });
     }
 
     const userTasks = [];
@@ -1373,16 +1276,11 @@ exports.getTaskSubmissions = async (req, res) => {
     }
 
     const users = await User.find({ 'groups.groupId': lecture.group_id });
-    const approvedUsers = users.filter(user => {
-      return user.groups.some(group =>
-        group.groupId.toString() === lecture.group_id.toString() && group.status === 'approved'
-      );
-    });
 
     const submittedUsers = [];
     const notSubmittedUsers = [];
 
-    approvedUsers.forEach(user => {
+    users.forEach(user => {
       const submission = task.submissions.find(sub => sub.userId.toString() === user._id.toString());
 
       if (submission) {

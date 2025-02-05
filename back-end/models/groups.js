@@ -75,8 +75,12 @@ instructorName:{
 imageCourse:{
   type:String,
   // required:[true, 'image courrse is required']
+},
+imageInstructor:{
+  type:String,
 }
 });
+
 groupsSchema.pre('save', async function (next) {
   this.updated_at = Date.now();
   next();

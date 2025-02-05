@@ -1,49 +1,70 @@
+// const jwt = require('jsonwebtoken');
+// const User = require('../models/users');
+// const mongoose = require('mongoose');
+// const authenticate = async (req, res, next) => {
+//   const token = req.header('Authorization')?.replace('Bearer ', '');
+
+//   if (!token) {
+//     console.log("No token provided");
+//     return res.status(401).json({ message: 'Access denied.' });
+//   }
+
+//   try {
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     console.log("Decoded Token:", decoded); 
+
+//     const user = await User.findById(decoded.id);
+//     console.log("User Found:", user);
+
+//     if (!user) {
+//       return res.status(401).json({ message: 'User not found.' });
+//     }
+
+//     if (user.resetPasswordExpiry && Date.now() > user.resetPasswordExpiry) {
+//       return res.status(401).json({ message: 'Password reset token has expired. Please request a new one.' });
+//     }
+
+//     req.user = {
+//       id: user._id,
+//       role: user.role,
+//       groups: user.groups || [],
+//     };
+
+//     console.log("User Authenticated:", req.user);
+//     next();
+//   } catch (error) {
+//     console.log("Invalid token:", error.message);
+//     return res.status(400).json({ message: 'Invalid token.' });
+//   }
+// };
+
+// module.exports = authenticate;
 const jwt = require('jsonwebtoken');
 const User = require('../models/users');
-const mongoose = require('mongoose'); // لاستعمال ObjectId
+const asyncHandler = require('express-async-handler');
 
-const authenticate = async (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-  // const token = req.cookies.token
+const authenticate = asyncHandler(async(req, res, next) =>{
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    // check the token is in the header
+    if(token){
+        try{
+            const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
-  if (!token) {
-    return res.status(401).json({ message: 'Access denied. ' });
-  }
+            const user = await User.findById(decoded.userId).select('-password');
+            console.log(token)
 
-  try {
-    // التحقق من التوكن
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
-      return res.status(401).json({ message: 'User not found.' });
+            if(!user){
+                return res.status(401).json({message: "Unauthorized: User not found"});
+            }
+            req.user = user;
+            next();
+        } catch(error){
+            console.error("error virification token", error.message);
+            return res.status(401).json({message: "Unauthorized: Invalid Token"});
+        }
+    } else{
+        // console.log(token)
+        return res.status(401).json({message: "Unauthorized: Invalid Token"});
     }
-
-    // // التحقق من صلاحية lastToken
-    // if (user.lastToken && user.lastToken !== token) {
-    //   return res.status(401).json({ message: 'Token has expired. Please log in again.' });
-    // }
-
-    // // التحقق من أن tokenVersion متطابق
-    // if (decoded.tokenVersion !== user.tokenVersion) {
-    //   return res.status(401).json({ message: 'Token has expired. Please log in again.' });
-    // }
-
-    // التحقق من أن resetPasswordExpiry ليس قد انتهى
-    if (user.resetPasswordExpiry && Date.now() > user.resetPasswordExpiry) {
-      return res.status(401).json({ message: 'Password reset token has expired. Please request a new one.' });
-    }
-
-    req.user = {
-      id: user._id,
-      role: user.role,
-      groups: user.groups || [],
-    };
-
-    next();
-  } catch (error) {
-    return res.status(400).json({ message: 'Invalid token.' });
-  }
-};
-
-module.exports = authenticate;
+});
+module.exports = authenticate

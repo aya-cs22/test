@@ -1,5 +1,6 @@
 const transporter = require('../config/mailConfig');
 const xss = require('xss');
+const asyncHandler = require('express-async-handler');
 
 const jwt = require('jsonwebtoken');
 const User = require('../models/users');
@@ -16,13 +17,17 @@ const nodemailer = require('nodemailer');
 // Import FingerprintJS
 const FingerprintJS = require('@fingerprintjs/fingerprintjs');
 
-const generateToken = (user) => {
-    return jwt.sign(
-        { id: user.id, name: user.name, email: user.email },
-        process.env.JWT_SECRET,
-        { expiresIn: '3h' }
-    );
-};
+
+function  generateTokens(user , regenerateRefreshToken = false){
+    const accessToken = jwt.sign({userId: user._id} , process.env.ACCESS_TOKEN_SECRET, {expiresIn: '8h'});
+    let refreshToken = user.refreshToken;
+    if(regenerateRefreshToken || !refreshToken){
+        refreshToken = jwt.sign({userId: user._id}, process.env.REFRESH_TOKEN_SECRET, {expiresIn: '10d'});
+        user.refreshToken = refreshToken;
+        user.save();
+    }
+    return{ accessToken, refreshToken};
+}
 
 const EMAIL_VERIFICATION_TIMEOUT = 10 * 60 * 1000; // 10 minutes 
 
@@ -51,270 +56,105 @@ const generateVerificationCode = () => {
 
 
 
+exports.register =asyncHandler (async (req, res) => {
+    let { name, email, password, phone_number } = req.body;
+    name = escapeHtml(name);
+    email = escapeHtml(email);
+    phone_number = escapeHtml(phone_number);
+    password = escapeHtml(password);
 
+    // Check if the user exists
+    let user = await User.findOne({ email });
 
-// // register user
-// exports.register = async (req, res) => {
-//     await body('email').isEmail().withMessage('Invalid email format').run(req);
-//     await body('password').isLength({ min: 10 }).withMessage('Password must be at least 10 characters long').run(req);
-//     await body('phone_number').isMobilePhone().withMessage('Invalid phone number').run(req);
-//     await body('name').isLength({ min: 3 }).withMessage('Name must be at least 3 characters long').run(req); // Name validation
+    if (user) {
+        if (user.isVerified) {
+            return res.status(400).json({ message: 'User already exists and is verified' });
+        } else {
+            user.emailVerificationCode = generateVerificationCode();
+            user.verificationCodeExpiry = new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT);
 
-//     const errors = validationResult(req);
-//     if (!errors.isEmpty()) {
-//         return res.status(400).json({ errors: errors.array() });
-//     }
+            
+            await user.save();
 
-//     try {
-//         let { name, email, password, phone_number, fingerprint } = req.body;
-//         name = escapeHtml(name);
-//         email = escapeHtml(email);
-//         phone_number = escapeHtml(phone_number);
-//         password = escapeHtml(password);
-//         // Check if the user exists
-//         let user = await User.findOne({ email });
-//         // let token;
-//         if (user) {
-//             if (user.isVerified) {
-//                 return res.status(400).json({ message: 'User already exists and is verified' });
-//             } else {
-//                 user.emailVerificationCode = generateVerificationCode();
-//                 user.verificationCodeExpiry = new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT);
-//                 // token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '10m' });
-//                 const token = jwt.sign(
-//                     { id: user._id, role: user.role },
-//                     process.env.JWT_SECRET,
-//                     { expiresIn: '3h' }
-//                 );
-//                 user.lastToken = token;
-//                 await user.save();
-
-//                 const mailOptions = {
-//                     from: process.env.ADMIN_EMAIL,
-//                     to: user.email,
-//                     subject: '🔑 Email Verification Code from Code Eagles',
-//                     html: `
-//                       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-//                         <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
-//                           <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
-//                         </header>
-//                         <div style="padding: 20px; background-color: #f9f9f9;">
-//                           <h2 style="font-size: 20px; color: #333;">Hello, ${user.name}!</h2>
-//                           <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
-//                           <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
-//                             <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${user.emailVerificationCode}</p>
-//                           </div>
-//                           <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
-//                           <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
-//                         </div>
-//                         <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
-//                           <p>If you have any issues, feel free to <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
-//                         </footer>
-//                       </div>
-//                     `
-//                 };
-
-
-//                 // res.cookie('token', token, {
-//                 //     httpOnly: true,
-//                 //     // secure: process.env.NODE_ENV === 'production',
-//                 //     secure: false,
-//                 //     maxAge: 10 * 60 * 1000,
-//                 // });
-//                 await transporter.sendMail(mailOptions);
-//                 return res.status(200).json({ message: 'Verification code resent. Please verify your email.', token });
-//             }
-//         }
-
-//         const role = email === process.env.ADMIN_EMAIL ? 'admin' : 'user';
-
-
-
-
-
-//         // Create a new user instance
-//         const newUser = new User({
-//             name,
-//             email,
-//             phone_number,
-//             password,
-//             isVerified: false,
-//             groupId: [],
-//             emailVerificationCode: generateVerificationCode(),
-//             verificationCodeExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT),
-//             fingerprint
-//         });
-//         // token = jwt.sign({ id: newUser._id, email: newUser.email }, process.env.JWT_SECRET, { expiresIn: '10m' });
-     
-//         newUser.lastToken = token;
-//         console.log(newUser);
-//         await newUser.save();
-
-//         // Send verification email
-//         const mailOptions = {
-//             from: process.env.ADMIN_EMAIL,
-//             to: newUser.email,
-//             subject: '🔑 Email Verification Code from Code Eagles',
-//             html: `
-//               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-//                 <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
-//                   <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
-//                 </header>
-//                 <div style="padding: 20px; background-color: #f9f9f9;">
-//                   <h2 style="font-size: 20px; color: #333;">Hello, ${newUser.name}!</h2>
-//                   <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
-//                   <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
-//                     <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${newUser.emailVerificationCode}</p>
-//                   </div>
-//                   <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
-//                   <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
-//                 </div>
-//                 <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
-//                   <p>If you have any issues, feel free to <a href="codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
-//                 </footer>
-//               </div>
-//             `
-//         };
-
-//         await transporter.sendMail(mailOptions);
-//         // res.cookie('token', token, {
-//         //     httpOnly: true,
-//         //     // secure: process.env.NODE_ENV === 'production',
-//         //     secure:false,
-//         //     maxAge: 10 * 60 * 1000,
-//         // });
-//         res.status(200).json({ message: 'Registration successful, please verify your email', token });
-//     } catch (error) {
-//         console.error('Registration error:', error);
-//         res.status(500).json({ message: 'Server error' });
-//     }
-// };
-
-
-exports.register = async (req, res) => {
-    await body('email').isEmail().withMessage('Invalid email format').run(req);
-    await body('password').isLength({ min: 10 }).withMessage('Password must be at least 10 characters long').run(req);
-    await body('phone_number').isMobilePhone().withMessage('Invalid phone number').run(req);
-    await body('name').isLength({ min: 3 }).withMessage('Name must be at least 3 characters long').run(req);
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
-    try {
-        let { name, email, password, phone_number, fingerprint } = req.body;
-        name = escapeHtml(name);
-        email = escapeHtml(email);
-        phone_number = escapeHtml(phone_number);
-        password = escapeHtml(password);
-
-        // Check if the user exists
-        let user = await User.findOne({ email });
-
-        if (user) {
-            if (user.isVerified) {
-                return res.status(400).json({ message: 'User already exists and is verified' });
-            } else {
-                user.emailVerificationCode = generateVerificationCode();
-                user.verificationCodeExpiry = new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT);
-
-                const token = jwt.sign(
-                    { id: user._id, role: user.role },
-                    process.env.JWT_SECRET,
-                    { expiresIn: '10m' }
-                );
-                user.lastToken = token;
-                await user.save();
-
-                const mailOptions = {
-                    from: process.env.ADMIN_EMAIL,
-                    to: user.email,
-                    subject: '🔑 Email Verification Code from Code Eagles',
-                    html: `
-                      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-                        <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
-                          <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
-                        </header>
-                        <div style="padding: 20px; background-color: #f9f9f9;">
-                          <h2 style="font-size: 20px; color: #333;">Hello, ${user.name}!</h2>
-                          <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
-                          <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
-                            <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${user.emailVerificationCode}</p>
-                          </div>
-                          <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
-                          <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
+            const mailOptions = {
+                from: process.env.ADMIN_EMAIL,
+                to: user.email,
+                subject: '🔑 Email Verification Code from Code Eagles',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                    <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
+                        <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
+                    </header>
+                    <div style="padding: 20px; background-color: #f9f9f9;">
+                        <h2 style="font-size: 20px; color: #333;">Hello, ${user.name}!</h2>
+                        <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
+                        <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
+                        <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${user.emailVerificationCode}</p>
                         </div>
-                        <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
-                          <p>If you have any issues, feel free to <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
-                        </footer>
-                      </div>
-                    `
-                };
+                        <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
+                        <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
+                    </div>
+                    <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
+                        <p>If you have any issues, feel free to <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
+                    </footer>
+                    </div>
+                `
+            };
 
-                await transporter.sendMail(mailOptions);
-                return res.status(200).json({ message: 'Verification code resent. Please verify your email.', token });
-            }
+            await transporter.sendMail(mailOptions);
+            return res.status(200).json({ message: 'Verification code resent. Please verify your email.' });
         }
-
-        const role = email === process.env.ADMIN_EMAIL ? 'admin' : 'user';
-        // Create a new user instance
-        const newUser = new User({
-            name,
-            email,
-            phone_number,
-            password,
-            isVerified: false,
-            groupId: [],
-            emailVerificationCode: generateVerificationCode(),
-            verificationCodeExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT),
-            fingerprint
-        });
-
-        // Generate token for the new user
-        const token = jwt.sign(
-            { id: newUser._id, role: newUser.role },
-            process.env.JWT_SECRET,
-            { expiresIn: '3h' }
-        );
-
-        newUser.lastToken = token;
-        console.log(newUser);
-        await newUser.save();
-
-        // Send verification email
-        const mailOptions = {
-            from: process.env.ADMIN_EMAIL,
-            to: newUser.email,
-            subject: '🔑 Email Verification Code from Code Eagles',
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-                <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
-                  <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
-                </header>
-                <div style="padding: 20px; background-color: #f9f9f9;">
-                  <h2 style="font-size: 20px; color: #333;">Hello, ${newUser.name}!</h2>
-                  <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
-                  <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
-                    <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${newUser.emailVerificationCode}</p>
-                  </div>
-                  <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
-                  <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
-                </div>
-                <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
-                  <p>If you have any issues, feel free to <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
-                </footer>
-              </div>
-            `
-        };
-
-        await transporter.sendMail(mailOptions);
-        res.status(200).json({ message: 'Registration successful, please verify your email', token });
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ message: 'Server error' });
     }
-};
+
+    const role = email === process.env.ADMIN_EMAIL ? 'admin' : 'user';
+    // Create a new user instance
+    const newUser = new User({
+        name,
+        email,
+        phone_number,
+        password,
+        isVerified: false,
+        groupId: [],
+        emailVerificationCode: generateVerificationCode(),
+        verificationCodeExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TIMEOUT),
+        
+    });
+
+    
+
+    console.log(newUser);
+    await newUser.save();
+
+    // Send verification email
+    const mailOptions = {
+        from: process.env.ADMIN_EMAIL,
+        to: newUser.email,
+        subject: '🔑 Email Verification Code from Code Eagles',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+            <header style="background-color: #4CAF50; padding: 20px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 24px;">Welcome to Code Eagles! 🦅</h1>
+            </header>
+            <div style="padding: 20px; background-color: #f9f9f9;">
+                <h2 style="font-size: 20px; color: #333;">Hello, ${newUser.name}!</h2>
+                <p style="color: #555;">To complete your registration, please verify your email address using the code below:</p>
+                <div style="text-align: center; margin: 20px 0; padding: 15px; background-color: #e1f5e1; border: 1px solid #ddd; border-radius: 5px;">
+                <p style="font-size: 1.5em; font-weight: bold; color: #4CAF50;">${newUser.emailVerificationCode}</p>
+                </div>
+                <p style="color: #555;">This code is valid for the next 10 minutes. If you didn’t request this email, please ignore it.</p>
+                <p style="margin-top: 20px; color: #555;">Happy Coding!<br>The Code Eagles Team</p>
+            </div>
+            <footer style="background-color: #f1f1f1; padding: 10px; text-align: center; color: #777; font-size: 14px;">
+                <p>If you have any issues, feel free to <a href="mailto:codeeagles653@gmail.com" style="color: #4CAF50;">contact us</a>.</p>
+            </footer>
+            </div>
+        `
+    };
+
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({ message: 'Registration successful, please verify your email' });
+
+});
 
 
 exports.verifyEmail = async (req, res) => {
@@ -433,35 +273,6 @@ exports.forgotPassword = async (req, res) => {
     }
 };
 
-// // update password without token
-// exports.resetPassword = async (req, res) => {
-//     try {
-//         const { resetCode, newPassword } = req.body;
-//         if (!newPassword || newPassword.length < 10) {
-//             return res.status(400).json({ message: 'New password must be at least 10 characters long' });
-//         }
-//         const user = await User.findOne({
-//             resetPasswordToken: resetCode,
-//             resetPasswordExpiry: { $gt: Date.now() }
-//         });
-
-//         if (!user) {
-//             return res.status(400).json({ message: 'Invalid or expired code' });
-//         }
-
-//         user.password = newPassword;
-//         user.resetPasswordToken = undefined;
-//         user.resetPasswordExpiry = undefined;
-//         user.tokenVersion += 1;
-//         await user.save();
-
-//         res.status(200).json({ message: 'Password has been reset successfully' });
-//     } catch (error) {
-//         console.error('Error resetting password:', error);
-//         res.status(500).json({ message: 'Server error' });
-//     }
-// };
-
 
 
 
@@ -515,7 +326,7 @@ exports.resetPassword = async (req, res) => {
 
 
 exports.login = async (req, res) => {
-    const { email, password, fingerprint } = req.body;
+    const { email, password } = req.body;
 
     try {
         const user = await User.findOne({ email });
@@ -532,43 +343,17 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: 'Please verify your email first' });
         }
 
-        if (!user.fingerprint) {
-            user.fingerprint = fingerprint; 
-            
-            const token = jwt.sign(
-                { id: user._id, role: user.role },
-                process.env.JWT_SECRET,
-                { expiresIn: '3h' }
-            );
-            user.lastToken = token; 
+        const { accessToken, refreshToken } = generateTokens(user);
         
-            await user.save(); 
-            return res.status(200).json({
-                message: 'Login successful. Fingerprint saved for future logins.',
-                token,  
-            });
-        }
-        
-
-        if (user.role !== 'admin' && user.fingerprint !== fingerprint) {
-            return res.status(400).json({ message: 'Fingerprint mismatch. Login denied.' });
-        }
-
-        const token = jwt.sign(
-            { id: user._id, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: '3h' }
-        );
-        user.lastToken = token; 
-        await user.save(); 
         res.status(200).json({
-            message: 'Login successful',
-            token,
+            message: "Login successfully",
+            accessToken: accessToken,
+            refreshToken: refreshToken,
             user: {
                 id: user._id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: user.role,
             }
         });
     } catch (error) {
@@ -577,6 +362,47 @@ exports.login = async (req, res) => {
     }
 };
 
+
+
+
+exports.refreshToken = asyncHandler(async(req, res) =>{
+    const {refreshToken} = req.body;
+    if(!refreshToken){
+        return res.status(401).json({message: "No refresh token provided"});
+    }
+    const user = await User.findOne({ refreshToken });
+    if(!user){
+        return res.status(403).json({ message: 'Invaild refresh token'});
+    }
+    // check token
+    try{
+        jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET)
+        const {accessToken, refreshToken: newRefreshToken} = generateTokens(user, false);
+        return res.status(200).json( {accessToken, refreshToken: newRefreshToken} )
+    } catch(error){
+        return res.status(403).json({ message: 'Invalid refresh token', error: error.message });
+    }
+    
+
+})
+
+
+
+
+exports.logout = asyncHandler(async(req, res) =>{
+    const { refreshToken } = req.body;
+    if(!refreshToken){
+        return res.status(400).json({message: 'No Refresh token provided'})
+    }
+
+    const user = await User.findOne({refreshToken});
+    if(!user){
+        return res.status(400).json({message: 'user not found'});
+    }
+    user.refreshToken = null;
+    await user.save();
+    return res.status(200).json({message: 'Logout sucessfully'});
+})
 
 
 exports.addUser = async (req, res) => {
@@ -765,40 +591,6 @@ exports.getAllUsers = async (req, res) => {
 
 
 
-// exports.getAllUsers = async (req, res) => {
-//     try {
-//         if (req.user.role !== 'admin') {
-//             return res.status(403).json({ message: 'Access denied' });
-//         }
-
-//         if (!redisClient.isOpen) {
-//             await redisClient.connect(); 
-//         }
-
-//         const cachedUsers = await redisClient.get('all_users');
-
-//         if (cachedUsers) {
-//             console.log('Returning data from Redis');
-//             return res.status(200).json(JSON.parse(cachedUsers));
-//         }
-
-//         const users = await User.find().select('-password');
-        
-//         await redisClient.set('all_users', JSON.stringify(users), { EX: 3600 }); 
-//         console.log('Returning data from MongoDB');
-        
-//         res.status(200).json(users);
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({ message: 'Server error' });
-//     }
-// };
-
-
-
-
-
-
 
 
 exports.getPendingUsers = async (req, res) => {
@@ -951,45 +743,38 @@ exports.deleteUser = async (req, res) => {
         const userIdFromToken = req.user.id;
         const userIdToDelete = id || userIdFromToken;
 
-        // التأكد من صلاحيات المستخدم
         if (req.user.role !== 'admin' && !id) {
             if (userIdFromToken !== userIdToDelete) {
                 return res.status(403).json({ message: 'Access denied' });
             }
         }
 
-        // التحقق من وجود المستخدم
         const user = await User.findById(userIdToDelete).session(session);
         if (!user) {
             await session.abortTransaction();
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // تحديث المجموعات وحذف المستخدم من قائمة الأعضاء
         await Groups.updateMany(
             { "members.user_id": userIdToDelete },
             { $pull: { members: { user_id: userIdToDelete } } },
             { session }
         );
 
-        // تحديث المحاضرات وحذف المستخدم من المهام
         await Lectures.updateMany(
             { "tasks.submissions.userId": userIdToDelete },
             { $pull: { "tasks.$[].submissions": { userId: userIdToDelete } } },
             { session }
         );
 
-        // تحديث الحضور وحذف المستخدم من قائمة الحضور
         await Lectures.updateMany(
             { "attendees.userId": userIdToDelete },
             { $pull: { attendees: { userId: userIdToDelete } } },
             { session }
         );
 
-        // حذف المستخدم من قاعدة البيانات
         await User.findByIdAndDelete(userIdToDelete).session(session);
 
-        // إنهاء الجلسة بنجاح
         await session.commitTransaction();
 
         return res.status(200).json({ 
@@ -997,14 +782,12 @@ exports.deleteUser = async (req, res) => {
         });
 
     } catch (error) {
-        // التراجع عن الجلسة في حالة وجود خطأ
         if (session.inTransaction()) {
             await session.abortTransaction();
         }
         console.error('Error deleting user: ', error);
         res.status(500).json({ message: 'Server error' });
     } finally {
-        // إنهاء الجلسة
         session.endSession();
     }
 };
@@ -1086,50 +869,6 @@ exports.deleteFeedback = async (req, res) => {
 
 
 
-// exports.addAllowedEmails = async (req, res) => {
-//     try {
-
-//         const { groupId, allowedEmails } = req.body;
-//         const adminId = req.user.id;
-
-//         const adminUser = await User.findById(adminId);
-//         if (adminUser.role !== 'admin') {
-//             return res.status(403).json({ message: 'Access denied: Only admins can perform this action' });
-//         }
-
-//         const group = await Groups.findById(groupId);
-//         if (!group) {
-//             return res.status(404).json({ message: 'Group not found' });
-//         }
-
-//         group.allowedEmails = group.allowedEmails || [];
-
-//         for (const email of allowedEmails) {
-//             const userExists = await User.findOne({ email });
-//             if (!userExists) {
-//                 return res.status(400).json({ message: `Email ${email} does not exist in the database` });
-//             }
-//         }
-
-//         const uniqueEmailsToAdd = allowedEmails.filter(email => !group.allowedEmails.includes(email));
-//         if (uniqueEmailsToAdd.length === 0) {
-//             return res.status(400).json({ message: 'All emails are already added to this group' });
-//         }
-
-//         group.allowedEmails.push(...uniqueEmailsToAdd);
-//         await group.save();
-
-//         return res.status(200).json({
-//             message: 'Allowed emails added successfully',
-
-//             allowedEmails: group.allowedEmails
-//         });
-//     } catch (error) {
-//         console.error('Error adding allowed emails:', error);
-//         return res.status(500).json({ message: 'Server error' });
-//     }
-// };
-
 exports.addAllowedEmails = async (req, res) => {
     try {
         const { groupId, allowedEmails } = req.body;
@@ -1148,13 +887,6 @@ exports.addAllowedEmails = async (req, res) => {
         group.allowedEmails = group.allowedEmails || [];
 
         const emailsArray = typeof allowedEmails === 'string' ? allowedEmails.split(',') : allowedEmails;
-
-        // for (const email of emailsArray) {
-        //     const userExists = await User.findOne({ email: email.trim() });
-        //     if (!userExists) {
-        //         return res.status(400).json({ message: `Email ${email} does not exist in the database` });
-        //     }
-        // }
 
         const uniqueEmailsToAdd = emailsArray.filter(email => !group.allowedEmails.includes(email.trim()));
         if (uniqueEmailsToAdd.length === 0) {
@@ -1180,13 +912,11 @@ exports.getAllowedEmails = async (req, res) => {
         console.log('Request User:', req.user);
         const adminId = req.user.id;
 
-        // التحقق من أن المستخدم هو admin
         const adminUser = await User.findById(adminId);
         if (adminUser.role !== 'admin') {
             return res.status(403).json({ message: 'Access denied: Only admins can perform this action' });
         }
 
-        // الحصول على جميع المجموعات
         const groups = await Groups.find().select('title type_course location start_date allowedEmails');
         if (!groups || groups.length === 0) {
             return res.status(404).json({ message: 'No groups found' });
@@ -1195,20 +925,16 @@ exports.getAllowedEmails = async (req, res) => {
         console.log('Allowed Emails:', groups);
 
         let users = [];
-        // نمر عبر كل مجموعة للحصول على المستخدمين المقترحين
         for (const group of groups) {
             if (group.allowedEmails && group.allowedEmails.length > 0) {
-                // البحث عن المستخدمين الذين لديهم بريد إلكتروني موجود في allowedEmails
                 const groupUsers = await User.find({
                     email: { $in: group.allowedEmails },
                 }).select('name email phone_number');
 
-                // إضافة كل مستخدم إلى القائمة
                 users.push(...groupUsers);
             }
         }
 
-        // إعداد الاستجابة بحيث تحتوي على بيانات كل مجموعة والمستخدمين المرتبطين بكل بريد إلكتروني
         const response = groups.map(group => ({
             groupId: group._id,
             title: group.title,
@@ -1216,11 +942,10 @@ exports.getAllowedEmails = async (req, res) => {
             location: group.location,
             start_date: group.start_date,
             allowedEmails: group.allowedEmails.map(email => {
-                // العثور على المستخدم الذي يطابق البريد الإلكتروني
                 const user = users.find(u => u.email === email);
                 return {
                     email,
-                    user: user || null // إضافة بيانات المستخدم إذا وجد أو null إذا لم يتم العثور على المستخدم
+                    user: user || null 
                 };
             }),
         }));
@@ -1241,13 +966,11 @@ exports.updateAllowedEmails = async (req, res) => {
         const { groupId, allowedEmails } = req.body;
         const adminId = req.user.id;
 
-        //
         const adminUser = await User.findById(adminId);
         if (adminUser.role !== 'admin') {
             return res.status(403).json({ message: 'Access denied: Only admins can perform this action' });
         }
 
-        // العثور على الجروب
         const group = await Groups.findById(groupId);
         if (!group) {
             return res.status(404).json({ message: 'Group not found' });
@@ -1459,9 +1182,6 @@ exports.joinGroupRequest = async (req, res) => {
 
 
 
-
-
-
 exports.getPendingJoinRequestsByGroup = async (req, res) => {
     try {
         if (req.user.role !== 'admin') {
@@ -1486,7 +1206,7 @@ exports.getPendingJoinRequestsByGroup = async (req, res) => {
                 userName: user.name,
                 groupName: group.title,
                 groupDate: group.start_date,
-                requestType: userGroup ? userGroup.requestType : null, // استخراج requestType إذا وجد
+                requestType: userGroup ? userGroup.requestType : null, 
             };
         });
 
@@ -1728,7 +1448,7 @@ exports.getPendingJoinRequestsByGroup = async (req, res) => {
                     .filter(group => group.status === 'pending' && group.groupId.toString() === groupId)
                     .map(group => ({
                         status: group.status,
-                        requestType: group.requestType  // إضافة الـ requestType هنا
+                        requestType: group.requestType  
                     })
                 )
             };
@@ -1741,11 +1461,6 @@ exports.getPendingJoinRequestsByGroup = async (req, res) => {
         return res.status(500).json({ message: 'Server error' });
     }
 };
-
-
-
-
-
 
 
 
@@ -2132,3 +1847,81 @@ exports.setRoleToApproved = async (req, res) => {
 };
 
 
+
+exports.sendMessageToGroup = async (req, res) => {
+    try {
+      const { groupId } = req.params; 
+      const { message, sendTo } = req.body; 
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      const group = await Groups.findById(groupId);
+      if (!group) {
+        return res.status(404).json({ message: 'Group not found' });
+      }
+
+      const users = await User.find({ 'groups.groupId': groupId });
+
+      let filteredUsers;
+      if (sendTo === 'approved') {
+        filteredUsers = users.filter(user => {
+          return user.groups.some(group =>
+            group.groupId.toString() === groupId.toString() && group.status === 'approved'
+          );
+        });
+      } else if (sendTo === 'approved+special') {
+        filteredUsers = users.filter(user => {
+          return user.groups.some(group =>
+            group.groupId.toString() === groupId.toString() && 
+            (group.status === 'approved' || group.status === 'special')
+          );
+        });
+      } else if (sendTo === 'special') {
+        filteredUsers = users.filter(user => {
+          return user.groups.some(group =>
+            group.groupId.toString() === groupId.toString() && group.status === 'special'
+          );
+        });
+      } else {
+        return res.status(400).json({ message: 'Invalid sendTo value. Use "approved", "approved+special", or "special".' });
+      }
+
+      if (filteredUsers.length === 0) {
+        return res.status(404).json({ message: 'No users found with the specified status' });
+      }
+
+      const emailAddresses = filteredUsers.map(user => user.email);
+
+      if (emailAddresses.length > 0) {
+        emailAddresses.forEach(async (email) => {
+          const mailOptions = {
+            from: process.env.ADMIN_EMAIL,
+            to: email,
+            subject: `Message from Admin`,
+            html: `
+              <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; padding: 20px;">
+                <h2>New Message</h2>
+                <p>Dear User,</p>
+                <p>${message}</p>
+              </div>
+            `,
+            text: `Dear User,\n\n${message}`,
+          };
+
+          try {
+            await transporter.sendMail(mailOptions);
+            console.log(`Message sent to ${email}`);
+          } catch (error) {
+            console.error(`Failed to send message to ${email}: `, error);
+          }
+        });
+      }
+
+      return res.status(200).json({ message: 'Message sent successfully' });
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      return res.status(500).json({ message: 'Server error' });
+    }
+};

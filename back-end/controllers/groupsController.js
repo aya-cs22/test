@@ -14,10 +14,11 @@ const nodemailer = require('nodemailer');
 //         pass: process.env.ADMIN_EMAIL_PASSWORD,
 //     },
 // });
+
 // creat group by admin
 exports.creatGroups = async (req, res) => {
     try {
-        const { title, type_course, location, start_date, end_date , price, course_details, about_course, instructorName,imageCourse  } = req.body;
+        const { title, type_course, location, start_date, end_date , price, course_details, about_course, instructorName,imageCourse , imageInstructor} = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Acess denied' });
         }
@@ -37,6 +38,7 @@ exports.creatGroups = async (req, res) => {
             about_course: about_course || [],
             instructorName,
             imageCourse,
+            imageInstructor
         });
         await groups.save();
         res.status(201).json(groups);
@@ -47,7 +49,6 @@ exports.creatGroups = async (req, res) => {
 };
 
 // get all groups
-
 exports.getAllGroups = async (req, res) => {
     try {
         const isAdmin = req.user && req.user.role === 'admin'; 
