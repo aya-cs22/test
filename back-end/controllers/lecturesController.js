@@ -183,35 +183,19 @@ exports.updateLecturesById = async (req, res) => {
 
 
 
-
 exports.getLectureById = async (req, res) => {
   try {
     const { lectureId } = req.params;
-    let lecture;
-
-    if (req.user.role === 'admin') {
-      lecture = await Lectures.findById(lectureId)
-        .populate('group_id', 'title')
-        .select('group_id title description article resources code tasks attendees attendanceCount');
-    } else {
-      lecture = await Lectures.findById(lectureId)
-        .populate('group_id', 'title')
-        .select('group_id title description article resources code tasks');
-
-      if (lecture) {
-        lecture = lecture.toObject();
-
-        if (lecture.tasks) {
-          lecture.tasks = lecture.tasks.map(task => {
-            delete task.submissions; 
-            return task;
-          });
-        }
-      }
-    }
+    let lecture = await Lectures.findById(lectureId)
+      .populate('group_id', 'title')
+      .select('group_id title description article resources code tasks attendees attendanceCount');
 
     if (!lecture) {
       return res.status(404).json({ message: 'Lecture not found' });
+    }
+
+    if (req.user.role === 'admin') {
+      return res.status(200).json({ lecture });
     }
 
     const user = req.user;
@@ -227,6 +211,18 @@ exports.getLectureById = async (req, res) => {
       }
     }
 
+    lecture = lecture.toObject();
+
+    if (lecture.tasks) {
+      lecture.tasks = lecture.tasks.map(task => {
+        delete task.submissions;
+        return task;
+      });
+    }
+
+    delete lecture.attendees;
+    delete lecture.attendanceCount;
+
     return res.status(200).json({ lecture });
 
   } catch (error) {
@@ -234,6 +230,8 @@ exports.getLectureById = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
 
 
 
@@ -1382,19 +1380,6 @@ exports.deleteTask = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
