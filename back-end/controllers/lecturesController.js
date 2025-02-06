@@ -148,7 +148,7 @@ exports.attendLecture = async (req, res) => {
 
 
 
-// Update Lecture
+
 exports.updateLecturesById = async (req, res) => {
   try {
     const { lectureId } = req.params;
@@ -158,7 +158,10 @@ exports.updateLecturesById = async (req, res) => {
       return res.status(403).json({ message: 'Access denied, admin only' });
     }
 
-    const lecture = await Lectures.findById(lectureId);
+    const lectureIdObj = new mongoose.Types.ObjectId(lectureId);
+
+    const lecture = await Lectures.findById(lectureIdObj);
+    
     if (!lecture) {
       return res.status(404).json({ message: 'Lecture not found' });
     }
@@ -176,6 +179,7 @@ exports.updateLecturesById = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 
 
@@ -234,23 +238,27 @@ exports.getLectureById = async (req, res) => {
 
 
 
+
+
 exports.getLecturesByGroupId = async (req, res) => {
   try {
     const { groupId } = req.params;
     let lectures;
 
     const user = req.user;
-    const approvedGroup = user.groups.find(group => group.groupId.toString() === groupId && (group.status === 'approved' || group.status === 'special'));
-
-    if (!approvedGroup) {
-      return res.status(403).json({ message: 'Access denied, user not approved in this group' });
-    }
+    console.log("User role:", req.user.role); 
 
     if (req.user.role === 'admin') {
       lectures = await Lectures.find({ group_id: groupId })
         .populate('group_id', 'title')
         .select('group_id title description article resources code tasks attendees attendanceCount'); 
-    } else { 
+    } else {
+      const approvedGroup = user.groups.find(group => group.groupId.toString() === groupId && (group.status === 'approved' || group.status === 'special'));
+
+      if (!approvedGroup) {
+        return res.status(403).json({ message: 'Access denied, user not approved in this group' });
+      }
+
       lectures = await Lectures.find({ group_id: groupId })
         .populate('group_id', 'title')
         .select('group_id title description article resources code tasks'); 
@@ -267,7 +275,6 @@ exports.getLecturesByGroupId = async (req, res) => {
           }
           delete lectureObject.attendees;
           delete lectureObject.attendanceCount;
-
 
           return lectureObject;
         });
@@ -291,6 +298,7 @@ exports.getLecturesByGroupId = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 
 
@@ -1374,5 +1382,21 @@ exports.deleteTask = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
